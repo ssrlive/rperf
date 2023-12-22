@@ -55,6 +55,12 @@ pub struct OperationResult {
     pub unbroken_sequence: Option<u64>,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct Failed {
+    pub origin: Option<String>,
+    pub stream_idx: Option<usize>,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "kind")]
 pub enum Message {
@@ -72,6 +78,8 @@ pub enum Message {
     Receive(OperationResult),
     #[serde(rename(deserialize = "done", serialize = "done"))]
     Done { origin: String, stream_idx: usize },
+    #[serde(rename(deserialize = "failed", serialize = "failed"))]
+    Failed(Failed),
     #[serde(rename(deserialize = "end", serialize = "end"))]
     End,
 }

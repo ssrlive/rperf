@@ -18,7 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::messaging::Message;
+use crate::protocol::messaging::{Failed, Message};
 use crate::BoxResult;
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -130,11 +130,12 @@ impl IntervalResult for ClientFailedResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "kind": "failed",
-            "origin": "client",
-            "stream_idx": self.stream_idx,
-        })
+        let info = Failed {
+            origin: Some("client".to_string()),
+            stream_idx: Some(self.stream_idx as usize),
+        };
+        let msg = Message::Failed(info);
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -158,11 +159,12 @@ impl IntervalResult for ServerFailedResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "kind": "failed",
-            "origin": "server",
-            "stream_idx": self.stream_idx,
-        })
+        let info = Failed {
+            origin: Some("server".to_string()),
+            stream_idx: Some(self.stream_idx as usize),
+        };
+        let msg = Message::Failed(info);
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -607,26 +609,17 @@ struct TcpStreamResults {
 }
 impl StreamResults for TcpStreamResults {
     fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
-        match value.get("kind") {
-            Some(k) => match k.as_str() {
-                Some(kind) => match kind {
-                    "send" => {
-                        self.send_results.push(TcpSendResult::from_json(value)?);
-                        Ok(())
-                    }
-                    "receive" => {
-                        self.receive_results.push(TcpReceiveResult::from_json(value)?);
-                        Ok(())
-                    }
-                    _ => Err(Box::new(simple_error::simple_error!(
-                        "unsupported kind for TCP stream-result: {}",
-                        kind
-                    ))),
-                },
-                None => Err(Box::new(simple_error::simple_error!("kind must be a string for TCP stream-result"))),
-            },
-            None => Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result"))),
+        let msg = serde_json::from_value::<Message>(value)?;
+        match msg {
+            Message::Receive(_) => self.receive_results.push(TcpReceiveResult { receive_result: msg }),
+            Message::Send(_) => self.send_results.push(TcpSendResult { send_result: msg }),
+            _ => {
+                return Err(Box::new(simple_error::simple_error!(
+                    "unsupported message type for TCP stream-result"
+                )))
+            }
         }
+        Ok(())
     }
 
     fn to_json(&self, omit_seconds: usize) -> serde_json::Value {
