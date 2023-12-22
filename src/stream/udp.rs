@@ -464,6 +464,7 @@ pub mod receiver {
 }
 
 pub mod sender {
+    use crate::protocol::messaging::{Message, OperationResult};
     use crate::protocol::results::IntervalResultBox;
     use crate::BoxResult;
     use std::net::UdpSocket;
@@ -594,17 +595,18 @@ pub mod sender {
                                 bytes_sent,
                                 self.stream_idx
                             );
-                            return Some(Ok(Box::new(super::UdpSendResult {
+                            let send_result = OperationResult {
+                                family: Some("udp".to_string()),
                                 timestamp: super::get_unix_timestamp(),
-
-                                stream_idx: self.stream_idx,
-
+                                stream_idx: Some(self.stream_idx),
                                 duration: elapsed_time.as_secs_f32(),
-
-                                bytes_sent,
-                                packets_sent,
-                                sends_blocked,
-                            })));
+                                bytes_sent: Some(bytes_sent),
+                                packets_sent: Some(packets_sent),
+                                sends_blocked: Some(sends_blocked),
+                                ..OperationResult::default()
+                            };
+                            let send_result = Message::Send(send_result);
+                            return Some(Ok(Box::new(super::UdpSendResult { send_result })));
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -642,17 +644,18 @@ pub mod sender {
                     bytes_sent,
                     self.stream_idx
                 );
-                Some(Ok(Box::new(super::UdpSendResult {
+                let send_result = OperationResult {
+                    family: Some("udp".to_string()),
                     timestamp: super::get_unix_timestamp(),
-
-                    stream_idx: self.stream_idx,
-
+                    stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
-
-                    bytes_sent,
-                    packets_sent,
-                    sends_blocked,
-                })))
+                    bytes_sent: Some(bytes_sent),
+                    packets_sent: Some(packets_sent),
+                    sends_blocked: Some(sends_blocked),
+                    ..OperationResult::default()
+                };
+                let send_result = Message::Send(send_result);
+                Some(Ok(Box::new(super::UdpSendResult { send_result })))
             } else {
                 log::debug!(
                     "no bytes sent via UDP stream {} in this interval; shutting down...",

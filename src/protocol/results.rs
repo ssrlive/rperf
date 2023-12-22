@@ -435,61 +435,80 @@ impl IntervalResult for UdpReceiveResult {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct UdpSendResult {
-    pub timestamp: f64,
-
-    pub stream_idx: u8,
-
-    pub duration: f32,
-
-    pub bytes_sent: u64,
-    pub packets_sent: u64,
-    pub sends_blocked: u64,
+    pub send_result: Message,
 }
+
 impl UdpSendResult {
     fn from_json(value: serde_json::Value) -> BoxResult<UdpSendResult> {
-        let mut local_value = value.clone();
-        if local_value.get("sends_blocked").is_none() {
-            //pre-0.1.8 peer
-            local_value["sends_blocked"] = serde_json::json!(0_u64); //report pre-0.1.8 status
-        }
+        let mut send_result = serde_json::from_value::<Message>(value)?;
+        if let Message::Send(ref mut send_result) = send_result {
+            if send_result.sends_blocked.is_none() {
+                //pre-0.1.8 peer
+                send_result.sends_blocked = Some(0_u64); //report pre-0.1.8 status
+            }
 
-        let send_result: UdpSendResult = serde_json::from_value(local_value)?;
-        Ok(send_result)
+            if send_result.family.as_deref() != Some("udp") {
+                return Err(Box::new(simple_error::simple_error!(
+                    "not a UDP send-result: {:?}",
+                    send_result.family
+                )));
+            }
+        } else {
+            return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
+        }
+        Ok(UdpSendResult { send_result })
     }
 
     fn to_result_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised.as_object_mut().unwrap().remove("stream_idx");
-        serialised
+        let mut msg = self.send_result.clone();
+        if let Message::Send(ref mut send_result) = msg {
+            send_result.stream_idx = None;
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 }
+
 impl IntervalResult for UdpSendResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::UdpSend
     }
 
     fn get_stream_idx(&self) -> u8 {
-        self.stream_idx
+        if let Message::Send(ref send_result) = self.send_result {
+            send_result.stream_idx.unwrap_or(0)
+        } else {
+            unreachable!();
+        }
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised["family"] = serde_json::json!("udp");
-        serialised["kind"] = serde_json::json!("send");
-        serialised
+        let mut msg = self.send_result.clone();
+        if let Message::Send(ref mut send_result) = msg {
+            send_result.family = Some("udp".to_string());
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor = if self.duration == 0.0 {
+        let send_result = if let Message::Send(ref send_result) = self.send_result {
+            send_result
+        } else {
+            unreachable!();
+        };
+
+        let duration_divisor = if send_result.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
             1.0
         } else {
-            self.duration
+            send_result.duration
         };
 
-        let bytes_per_second = self.bytes_sent as f32 / duration_divisor;
+        let bytes_per_second = send_result.bytes_sent.unwrap() as f32 / duration_divisor;
 
         let throughput = match bit {
             true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
@@ -501,16 +520,16 @@ impl IntervalResult for UdpSendResult {
             UDP send result over {:.2}s | stream: {}\n\
             bytes: {} | per second: {:.3} | {}\n\
             packets: {} per second: {:.3}",
-            self.duration,
-            self.stream_idx,
-            self.bytes_sent,
+            send_result.duration,
+            send_result.stream_idx.unwrap(),
+            send_result.bytes_sent.unwrap(),
             bytes_per_second,
             throughput,
-            self.packets_sent,
-            self.packets_sent as f32 / duration_divisor,
+            send_result.packets_sent.unwrap(),
+            send_result.packets_sent.unwrap() as f32 / duration_divisor,
         );
-        if self.sends_blocked > 0 {
-            output.push_str(&format!("\nstalls due to full send-buffer: {}", self.sends_blocked));
+        if send_result.sends_blocked.unwrap() > 0 {
+            output.push_str(&format!("\nstalls due to full send-buffer: {}", send_result.sends_blocked.unwrap()));
         }
         output
     }
@@ -684,10 +703,16 @@ impl StreamResults for UdpStreamResults {
                 continue;
             }
 
+            let sr = if let Message::Send(ref sr) = sr.send_result {
+                sr
+            } else {
+                unreachable!();
+            };
+
             duration_send += sr.duration as f64;
 
-            bytes_sent += sr.bytes_sent;
-            packets_sent += sr.packets_sent;
+            bytes_sent += sr.bytes_sent.unwrap();
+            packets_sent += sr.packets_sent.unwrap();
         }
 
         for (i, rr) in self.receive_results.iter().enumerate() {
@@ -1176,10 +1201,16 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
+                let sr = if let Message::Send(ref sr) = sr.send_result {
+                    sr
+                } else {
+                    unreachable!();
+                };
+
                 duration_send += sr.duration as f64;
 
-                bytes_sent += sr.bytes_sent;
-                packets_sent += sr.packets_sent;
+                bytes_sent += sr.bytes_sent.unwrap();
+                packets_sent += sr.packets_sent.unwrap();
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -1273,13 +1304,19 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
+                let sr = if let Message::Send(ref sr) = sr.send_result {
+                    sr
+                } else {
+                    unreachable!();
+                };
+
                 duration_send += sr.duration as f64;
                 stream_send_durations[stream_idx] += sr.duration as f64;
 
-                bytes_sent += sr.bytes_sent;
-                packets_sent += sr.packets_sent;
+                bytes_sent += sr.bytes_sent.unwrap();
+                packets_sent += sr.packets_sent.unwrap();
 
-                sends_blocked |= sr.sends_blocked > 0;
+                sends_blocked |= sr.sends_blocked.unwrap() > 0;
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {

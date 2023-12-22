@@ -44,6 +44,7 @@ pub struct OperationResult {
     pub stream_idx: Option<u8>,
     pub duration: f32,
     pub bytes_sent: Option<u64>,
+    pub packets_sent: Option<u64>,
     pub sends_blocked: Option<u64>,
     pub bytes_received: Option<u64>,
     pub packets_received: Option<u64>,
