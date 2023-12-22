@@ -70,6 +70,7 @@ impl UdpTestDefinition {
 }
 
 pub mod receiver {
+    use crate::protocol::messaging::{Message, OperationResult};
     use crate::protocol::results::IntervalResultBox;
     use crate::BoxResult;
     use chrono::NaiveDateTime;
@@ -424,22 +425,23 @@ pub mod receiver {
                     bytes_received,
                     self.stream_idx
                 );
-                Some(Ok(Box::new(super::UdpReceiveResult {
+
+                let receive_result = OperationResult {
+                    family: Some("udp".to_string()),
                     timestamp: super::get_unix_timestamp(),
-
-                    stream_idx: self.stream_idx,
-
+                    stream_idx: Some(self.stream_idx),
                     duration: start.elapsed().as_secs_f32(),
-
-                    bytes_received,
-                    packets_received: history.packets_received,
-                    packets_lost: history.packets_lost,
-                    packets_out_of_order: history.packets_out_of_order,
-                    packets_duplicated: history.packets_duplicated,
-
-                    unbroken_sequence: history.longest_unbroken_sequence,
+                    bytes_received: Some(bytes_received),
+                    packets_received: Some(history.packets_received),
+                    packets_lost: Some(history.packets_lost as u64),
+                    packets_out_of_order: Some(history.packets_out_of_order),
+                    packets_duplicated: Some(history.packets_duplicated),
+                    unbroken_sequence: Some(history.longest_unbroken_sequence),
                     jitter_seconds: history.longest_jitter_seconds,
-                })))
+                    ..OperationResult::default()
+                };
+                let receive_result = Message::Receive(receive_result);
+                Some(Ok(Box::new(super::UdpReceiveResult { receive_result })))
             } else {
                 log::debug!("no bytes received via UDP stream {} in this interval", self.stream_idx);
                 None

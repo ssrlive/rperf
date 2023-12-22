@@ -468,7 +468,7 @@ pub mod sender {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
-    use crate::protocol::messaging::{Message, SendResult};
+    use crate::protocol::messaging::{Message, OperationResult};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -641,13 +641,14 @@ pub mod sender {
                         peer_addr
                     );
 
-                    let send_result = SendResult {
+                    let send_result = OperationResult {
                         timestamp: super::get_unix_timestamp(),
                         stream_idx: Some(self.stream_idx),
                         duration: elapsed_time.as_secs_f32(),
-                        bytes_sent,
+                        bytes_sent: Some(bytes_sent),
                         sends_blocked: Some(sends_blocked),
                         family: Some("tcp".to_string()),
+                        ..OperationResult::default()
                     };
                     let send_result = Message::Send(send_result);
 
@@ -680,13 +681,14 @@ pub mod sender {
                     peer_addr
                 );
 
-                let send_result = SendResult {
+                let send_result = OperationResult {
                     timestamp: super::get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
-                    bytes_sent,
+                    bytes_sent: Some(bytes_sent),
                     sends_blocked: Some(sends_blocked),
                     family: Some("tcp".to_string()),
+                    ..OperationResult::default()
                 };
                 let send_result = Message::Send(send_result);
 

@@ -38,13 +38,20 @@ pub struct Configuration {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
-pub struct SendResult {
+pub struct OperationResult {
+    pub family: Option<String>,
     pub timestamp: f64,
     pub stream_idx: Option<u8>,
     pub duration: f32,
-    pub bytes_sent: u64,
+    pub bytes_sent: Option<u64>,
     pub sends_blocked: Option<u64>,
-    pub family: Option<String>,
+    pub bytes_received: Option<u64>,
+    pub packets_received: Option<u64>,
+    pub packets_lost: Option<u64>,
+    pub packets_out_of_order: Option<u64>,
+    pub packets_duplicated: Option<u64>,
+    pub jitter_seconds: Option<f32>,
+    pub unbroken_sequence: Option<u64>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -59,15 +66,9 @@ pub enum Message {
     #[serde(rename(deserialize = "begin", serialize = "begin"))]
     Begin,
     #[serde(rename(deserialize = "send", serialize = "send"))]
-    Send(SendResult),
+    Send(OperationResult),
     #[serde(rename(deserialize = "receive", serialize = "receive"))]
-    Receive {
-        bytes_received: usize,
-        duration: f64,
-        family: String,
-        stream_idx: usize,
-        timestamp: f64,
-    },
+    Receive(OperationResult),
     #[serde(rename(deserialize = "done", serialize = "done"))]
     Done { origin: String, stream_idx: usize },
     #[serde(rename(deserialize = "end", serialize = "end"))]

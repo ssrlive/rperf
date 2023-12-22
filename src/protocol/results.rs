@@ -311,7 +311,7 @@ impl IntervalResult for TcpSendResult {
             send_result.duration
         };
 
-        let bytes_per_second = send_result.bytes_sent as f32 / duration_divisor;
+        let bytes_per_second = send_result.bytes_sent.unwrap() as f32 / duration_divisor;
 
         let throughput = match bit {
             true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
@@ -319,11 +319,12 @@ impl IntervalResult for TcpSendResult {
         };
 
         let stream_idx = send_result.stream_idx.unwrap();
+        let bytes_sent = send_result.bytes_sent.unwrap();
         let mut output = format!(
             "----------\n\
             TCP send result over {:.2}s | stream: {}\n\
             bytes: {} | per second: {:.3} | {}",
-            send_result.duration, stream_idx, send_result.bytes_sent, bytes_per_second, throughput,
+            send_result.duration, stream_idx, bytes_sent, bytes_per_second, throughput,
         );
         let sends_blocked = send_result.sends_blocked.unwrap();
         if sends_blocked > 0 {
@@ -333,34 +334,34 @@ impl IntervalResult for TcpSendResult {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct UdpReceiveResult {
-    pub timestamp: f64,
-
-    pub stream_idx: u8,
-
-    pub duration: f32,
-
-    pub bytes_received: u64,
-    pub packets_received: u64,
-    pub packets_lost: i64,
-    pub packets_out_of_order: u64,
-    pub packets_duplicated: u64,
-
-    pub unbroken_sequence: u64,
-    pub jitter_seconds: Option<f32>,
+    pub receive_result: Message,
 }
 
 impl UdpReceiveResult {
     fn from_json(value: serde_json::Value) -> BoxResult<UdpReceiveResult> {
-        let receive_result: UdpReceiveResult = serde_json::from_value(value)?;
-        Ok(receive_result)
+        let receive_result: Message = serde_json::from_value(value)?;
+        if let Message::Receive(ref receive_result) = receive_result {
+            if receive_result.family.as_deref() != Some("udp") {
+                return Err(Box::new(simple_error::simple_error!(
+                    "not a UDP send-result: {:?}",
+                    receive_result.family
+                )));
+            }
+        } else {
+            return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
+        }
+        Ok(UdpReceiveResult { receive_result })
     }
 
     fn to_result_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised.as_object_mut().unwrap().remove("stream_idx");
-        serialised
+        let mut msg = self.receive_result.clone();
+        if let Message::Receive(ref mut send_result) = msg {
+            send_result.stream_idx = None;
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 }
 impl IntervalResult for UdpReceiveResult {
@@ -369,25 +370,38 @@ impl IntervalResult for UdpReceiveResult {
     }
 
     fn get_stream_idx(&self) -> u8 {
-        self.stream_idx
+        if let Message::Receive(ref receive_result) = self.receive_result {
+            receive_result.stream_idx.unwrap_or(0)
+        } else {
+            unreachable!();
+        }
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised["family"] = serde_json::json!("udp");
-        serialised["kind"] = serde_json::json!("receive");
-        serialised
+        let mut msg = self.receive_result.clone();
+        if let Message::Receive(ref mut receive_result) = msg {
+            receive_result.family = Some("udp".to_string());
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor = if self.duration == 0.0 {
+        let receive_result = if let Message::Receive(ref receive_result) = self.receive_result {
+            receive_result
+        } else {
+            unreachable!();
+        };
+
+        let duration_divisor = if receive_result.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
             1.0
         } else {
-            self.duration
+            receive_result.duration
         };
 
-        let bytes_per_second = self.bytes_received as f32 / duration_divisor;
+        let bytes_per_second = receive_result.bytes_received.unwrap() as f32 / duration_divisor;
 
         let throughput = match bit {
             true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
@@ -399,22 +413,22 @@ impl IntervalResult for UdpReceiveResult {
             UDP receive result over {:.2}s | stream: {}\n\
             bytes: {} | per second: {:.3} | {}\n\
             packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
-            self.duration,
-            self.stream_idx,
-            self.bytes_received,
+            receive_result.duration,
+            receive_result.stream_idx.unwrap(),
+            receive_result.bytes_received.unwrap(),
             bytes_per_second,
             throughput,
-            self.packets_received,
-            self.packets_lost,
-            self.packets_out_of_order,
-            self.packets_duplicated,
-            self.packets_received as f32 / duration_divisor,
+            receive_result.packets_received.unwrap(),
+            receive_result.packets_lost.unwrap(),
+            receive_result.packets_out_of_order.unwrap(),
+            receive_result.packets_duplicated.unwrap(),
+            receive_result.packets_received.unwrap() as f32 / duration_divisor,
         );
-        if self.jitter_seconds.is_some() {
+        if receive_result.jitter_seconds.is_some() {
             output.push_str(&format!(
                 "\njitter: {:.6}s over {} consecutive packets",
-                self.jitter_seconds.unwrap(),
-                self.unbroken_sequence
+                receive_result.jitter_seconds.unwrap(),
+                receive_result.unbroken_sequence.unwrap()
             ));
         }
         output
@@ -592,7 +606,7 @@ impl StreamResults for TcpStreamResults {
             };
 
             duration_send += sr.duration as f64;
-            bytes_sent += sr.bytes_sent;
+            bytes_sent += sr.bytes_sent.unwrap();
         }
 
         for (i, rr) in self.receive_results.iter().enumerate() {
@@ -681,16 +695,22 @@ impl StreamResults for UdpStreamResults {
                 continue;
             }
 
+            let rr = if let Message::Receive(ref rr) = rr.receive_result {
+                rr
+            } else {
+                unreachable!();
+            };
+
             duration_receive += rr.duration as f64;
 
-            bytes_received += rr.bytes_received;
-            packets_received += rr.packets_received;
-            packets_out_of_order += rr.packets_out_of_order;
-            packets_duplicated += rr.packets_duplicated;
+            bytes_received += rr.bytes_received.unwrap();
+            packets_received += rr.packets_received.unwrap();
+            packets_out_of_order += rr.packets_out_of_order.unwrap();
+            packets_duplicated += rr.packets_duplicated.unwrap();
 
             if rr.jitter_seconds.is_some() {
-                jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
-                unbroken_sequence_count += rr.unbroken_sequence;
+                jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
+                unbroken_sequence_count += rr.unbroken_sequence.unwrap();
 
                 jitter_calculated = true;
             }
@@ -877,7 +897,7 @@ impl TestResults for TcpTestResults {
                 };
 
                 duration_send += sr.duration as f64;
-                bytes_sent += sr.bytes_sent;
+                bytes_sent += sr.bytes_sent.unwrap();
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -939,7 +959,7 @@ impl TestResults for TcpTestResults {
                 duration_send += sr.duration as f64;
                 stream_send_durations[stream_idx] += sr.duration as f64;
 
-                bytes_sent += sr.bytes_sent;
+                bytes_sent += sr.bytes_sent.unwrap();
 
                 sends_blocked |= sr.sends_blocked.unwrap() > 0;
             }
@@ -1167,16 +1187,22 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
+                let rr = if let Message::Receive(ref rr) = rr.receive_result {
+                    rr
+                } else {
+                    unreachable!();
+                };
+
                 duration_receive += rr.duration as f64;
 
-                bytes_received += rr.bytes_received;
-                packets_received += rr.packets_received;
-                packets_out_of_order += rr.packets_out_of_order;
-                packets_duplicated += rr.packets_duplicated;
+                bytes_received += rr.bytes_received.unwrap();
+                packets_received += rr.packets_received.unwrap();
+                packets_out_of_order += rr.packets_out_of_order.unwrap();
+                packets_duplicated += rr.packets_duplicated.unwrap();
 
                 if rr.jitter_seconds.is_some() {
-                    jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
-                    unbroken_sequence_count += rr.unbroken_sequence;
+                    jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    unbroken_sequence_count += rr.unbroken_sequence.unwrap();
 
                     jitter_calculated = true;
                 }
@@ -1261,17 +1287,23 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
+                let rr = if let Message::Receive(ref rr) = rr.receive_result {
+                    rr
+                } else {
+                    unreachable!();
+                };
+
                 duration_receive += rr.duration as f64;
                 stream_receive_durations[stream_idx] += rr.duration as f64;
 
-                bytes_received += rr.bytes_received;
-                packets_received += rr.packets_received;
-                packets_out_of_order += rr.packets_out_of_order;
-                packets_duplicated += rr.packets_duplicated;
+                bytes_received += rr.bytes_received.unwrap();
+                packets_received += rr.packets_received.unwrap();
+                packets_out_of_order += rr.packets_out_of_order.unwrap();
+                packets_duplicated += rr.packets_duplicated.unwrap();
 
                 if rr.jitter_seconds.is_some() {
-                    jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
-                    unbroken_sequence_count += rr.unbroken_sequence;
+                    jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    unbroken_sequence_count += rr.unbroken_sequence.unwrap();
 
                     jitter_calculated = true;
                 }
