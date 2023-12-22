@@ -75,6 +75,7 @@ pub mod receiver {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
+    use crate::protocol::messaging::{Message, OperationResult};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const POLL_TIMEOUT: Duration = Duration::from_millis(250);
@@ -423,15 +424,16 @@ pub mod receiver {
                     self.stream_idx,
                     peer_addr
                 );
-                Some(Ok(Box::new(super::TcpReceiveResult {
+                let receive_result = OperationResult {
                     timestamp: super::get_unix_timestamp(),
-
-                    stream_idx: self.stream_idx,
-
+                    stream_idx: Some(self.stream_idx),
                     duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
-
-                    bytes_received,
-                })))
+                    bytes_received: Some(bytes_received),
+                    family: Some("tcp".to_string()),
+                    ..OperationResult::default()
+                };
+                let receive_result = Message::Receive(receive_result);
+                Some(Ok(Box::new(super::TcpReceiveResult { receive_result })))
             } else {
                 log::debug!(
                     "no bytes received via TCP stream {} from {} in this interval",

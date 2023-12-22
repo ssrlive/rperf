@@ -20,7 +20,6 @@
 
 use crate::protocol::messaging::Message;
 use crate::BoxResult;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -175,64 +174,88 @@ impl IntervalResult for ServerFailedResult {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct TcpReceiveResult {
-    pub timestamp: f64,
-
-    pub stream_idx: u8,
-
-    pub duration: f32,
-
-    pub bytes_received: u64,
+    pub receive_result: Message,
 }
+
 impl TcpReceiveResult {
     fn from_json(value: serde_json::Value) -> BoxResult<TcpReceiveResult> {
-        let receive_result: TcpReceiveResult = serde_json::from_value(value)?;
-        Ok(receive_result)
+        let mut receive_result: Message = serde_json::from_value(value)?;
+        if let Message::Receive(ref mut receive_result) = receive_result {
+            if receive_result.family.as_deref() != Some("tcp") {
+                return Err(Box::new(simple_error::simple_error!(
+                    "not a TCP receive-result: {:?}",
+                    receive_result.family
+                )));
+            }
+        } else {
+            return Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result")));
+        }
+        Ok(TcpReceiveResult { receive_result })
     }
 
     fn to_result_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised.as_object_mut().unwrap().remove("stream_idx");
-        serialised
+        let mut msg = self.receive_result.clone();
+        if let Message::Receive(ref mut receive_result) = msg {
+            receive_result.stream_idx = None;
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 }
+
 impl IntervalResult for TcpReceiveResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::TcpReceive
     }
 
     fn get_stream_idx(&self) -> u8 {
-        self.stream_idx
+        if let Message::Receive(ref receive_result) = self.receive_result {
+            receive_result.stream_idx.unwrap_or(0)
+        } else {
+            unreachable!();
+        }
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised["family"] = serde_json::json!("tcp");
-        serialised["kind"] = serde_json::json!("receive");
-        serialised
+        let mut msg = self.receive_result.clone();
+        if let Message::Receive(ref mut receive_result) = msg {
+            receive_result.family = Some("tcp".to_string());
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor = if self.duration == 0.0 {
+        let receive_result = if let Message::Receive(ref receive_result) = self.receive_result {
+            receive_result
+        } else {
+            unreachable!();
+        };
+
+        let duration_divisor = if receive_result.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
             1.0
         } else {
-            self.duration
+            receive_result.duration
         };
 
-        let bytes_per_second = self.bytes_received as f32 / duration_divisor;
+        let bytes_per_second = receive_result.bytes_received.unwrap() as f32 / duration_divisor;
 
         let throughput = match bit {
             true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
 
+        let stream_idx = receive_result.stream_idx.unwrap();
+        let bytes_received = receive_result.bytes_received.unwrap();
         format!(
             "----------\n\
             TCP receive result over {:.2}s | stream: {}\n\
             bytes: {} | per second: {:.3} | {}",
-            self.duration, self.stream_idx, self.bytes_received, bytes_per_second, throughput,
+            receive_result.duration, stream_idx, bytes_received, bytes_per_second, throughput,
         )
     }
 }
@@ -633,8 +656,10 @@ impl StreamResults for TcpStreamResults {
                 continue;
             }
 
-            duration_receive += rr.duration as f64;
-            bytes_received += rr.bytes_received;
+            if let Message::Receive(ref rr) = rr.receive_result {
+                duration_receive += rr.duration as f64;
+                bytes_received += rr.bytes_received.unwrap();
+            }
         }
 
         let summary = serde_json::json!({
@@ -930,8 +955,10 @@ impl TestResults for TcpTestResults {
                     continue;
                 }
 
-                duration_receive += rr.duration as f64;
-                bytes_received += rr.bytes_received;
+                if let Message::Receive(ref rr) = rr.receive_result {
+                    duration_receive += rr.duration as f64;
+                    bytes_received += rr.bytes_received.unwrap();
+                }
             }
         }
 
@@ -994,10 +1021,11 @@ impl TestResults for TcpTestResults {
                     continue;
                 }
 
-                duration_receive += rr.duration as f64;
-                stream_receive_durations[stream_idx] += rr.duration as f64;
-
-                bytes_received += rr.bytes_received;
+                if let Message::Receive(ref rr) = rr.receive_result {
+                    duration_receive += rr.duration as f64;
+                    stream_receive_durations[stream_idx] += rr.duration as f64;
+                    bytes_received += rr.bytes_received.unwrap();
+                }
             }
         }
         stream_send_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
