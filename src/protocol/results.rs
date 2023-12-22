@@ -74,11 +74,11 @@ impl IntervalResult for ClientDoneResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "kind": "done",
-            "origin": "client",
-            "stream_idx": self.stream_idx,
-        })
+        let msg = Message::Done {
+            origin: "client".to_string(),
+            stream_idx: self.stream_idx as usize,
+        };
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -102,11 +102,11 @@ impl IntervalResult for ServerDoneResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "kind": "done",
-            "origin": "server",
-            "stream_idx": self.stream_idx,
-        })
+        let msg = Message::Done {
+            origin: "server".to_string(),
+            stream_idx: self.stream_idx as usize,
+        };
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, _bit: bool) -> String {
