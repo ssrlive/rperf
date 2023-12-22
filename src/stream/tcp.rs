@@ -18,6 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::protocol::messaging::Configuration;
 use crate::protocol::results::{get_unix_timestamp, TcpReceiveResult, TcpSendResult};
 use crate::stream::{parse_port_spec, TestStream, INTERVAL};
 use crate::BoxResult;
@@ -37,28 +38,18 @@ pub struct TcpTestDefinition {
     pub length: usize,
 }
 impl TcpTestDefinition {
-    pub fn new(details: &serde_json::Value) -> BoxResult<TcpTestDefinition> {
+    pub fn new(cfg: &Configuration) -> BoxResult<TcpTestDefinition> {
         let mut test_id_bytes = [0_u8; 16];
-        for (i, v) in details
-            .get("test_id")
-            .unwrap_or(&serde_json::json!([]))
-            .as_array()
-            .unwrap()
-            .iter()
-            .enumerate()
-        {
+
+        for (i, &v) in cfg.test_id.iter().enumerate() {
             if i >= 16 {
                 //avoid out-of-bounds if given malicious data
                 break;
             }
-            test_id_bytes[i] = v.as_i64().unwrap_or(0) as u8;
+            test_id_bytes[i] = v;
         }
 
-        let length = details
-            .get("length")
-            .unwrap_or(&serde_json::json!(TEST_HEADER_SIZE))
-            .as_i64()
-            .unwrap() as usize;
+        let length = cfg.length as usize;
         if length < TEST_HEADER_SIZE {
             return Err(Box::new(simple_error::simple_error!(std::format!(
                 "{} is too short of a length to satisfy testing requirements",
@@ -66,9 +57,11 @@ impl TcpTestDefinition {
             ))));
         }
 
+        let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
+
         Ok(TcpTestDefinition {
             test_id: test_id_bytes,
-            bandwidth: details.get("bandwidth").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as u64,
+            bandwidth,
             length,
         })
     }
@@ -475,6 +468,7 @@ pub mod sender {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
+    use crate::protocol::messaging::{Message, SendResult};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -646,16 +640,18 @@ pub mod sender {
                         self.stream_idx,
                         peer_addr
                     );
-                    return Some(Ok(Box::new(super::TcpSendResult {
+
+                    let send_result = SendResult {
                         timestamp: super::get_unix_timestamp(),
-
-                        stream_idx: self.stream_idx,
-
+                        stream_idx: Some(self.stream_idx),
                         duration: elapsed_time.as_secs_f32(),
-
                         bytes_sent,
-                        sends_blocked,
-                    })));
+                        sends_blocked: Some(sends_blocked),
+                        family: Some("tcp".to_string()),
+                    };
+                    let send_result = Message::Send(send_result);
+
+                    return Some(Ok(Box::new(super::TcpSendResult { send_result })));
                 }
 
                 if bytes_to_send_remaining <= 0 {
@@ -683,16 +679,18 @@ pub mod sender {
                     self.stream_idx,
                     peer_addr
                 );
-                Some(Ok(Box::new(super::TcpSendResult {
+
+                let send_result = SendResult {
                     timestamp: super::get_unix_timestamp(),
-
-                    stream_idx: self.stream_idx,
-
+                    stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
-
                     bytes_sent,
-                    sends_blocked,
-                })))
+                    sends_blocked: Some(sends_blocked),
+                    family: Some("tcp".to_string()),
+                };
+                let send_result = Message::Send(send_result);
+
+                Some(Ok(Box::new(super::TcpSendResult { send_result })))
             } else {
                 log::debug!(
                     "no bytes sent via TCP stream {} to {} in this interval; shutting down...",

@@ -18,6 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::protocol::messaging::Message;
 use crate::BoxResult;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -236,74 +237,97 @@ impl IntervalResult for TcpReceiveResult {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct TcpSendResult {
-    pub timestamp: f64,
-
-    pub stream_idx: u8,
-
-    pub duration: f32,
-
-    pub bytes_sent: u64,
-    pub sends_blocked: u64,
+    pub send_result: Message,
 }
+
 impl TcpSendResult {
     fn from_json(value: serde_json::Value) -> BoxResult<TcpSendResult> {
-        let mut local_value = value.clone();
-        if local_value.get("sends_blocked").is_none() {
-            //pre-0.1.8 peer
-            local_value["sends_blocked"] = serde_json::json!(0_u64); //report pre-0.1.8 status
-        }
+        let mut send_result: Message = serde_json::from_value(value)?;
+        if let Message::Send(ref mut send_result) = send_result {
+            if send_result.sends_blocked.is_none() {
+                // pre-0.1.8 peer
+                send_result.sends_blocked = Some(0_u64); // report pre-0.1.8 status
+            }
 
-        let send_result: TcpSendResult = serde_json::from_value(local_value)?;
-        Ok(send_result)
+            if send_result.family.as_deref() != Some("tcp") {
+                return Err(Box::new(simple_error::simple_error!(
+                    "not a TCP send-result: {:?}",
+                    send_result.family
+                )));
+            }
+        } else {
+            return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
+        }
+        Ok(TcpSendResult { send_result })
     }
 
     fn to_result_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised.as_object_mut().unwrap().remove("stream_idx");
-        serialised
+        let mut msg = self.send_result.clone();
+        if let Message::Send(ref mut send_result) = msg {
+            send_result.stream_idx = None;
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 }
+
 impl IntervalResult for TcpSendResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::TcpSend
     }
 
     fn get_stream_idx(&self) -> u8 {
-        self.stream_idx
+        if let Message::Send(ref send_result) = self.send_result {
+            send_result.stream_idx.unwrap_or(0)
+        } else {
+            unreachable!();
+        }
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let mut serialised = serde_json::to_value(self).unwrap();
-        serialised["family"] = serde_json::json!("tcp");
-        serialised["kind"] = serde_json::json!("send");
-        serialised
+        let mut msg = self.send_result.clone();
+        if let Message::Send(ref mut send_result) = msg {
+            send_result.family = Some("tcp".to_string());
+        } else {
+            unreachable!();
+        }
+        serde_json::to_value(msg).unwrap()
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor = if self.duration == 0.0 {
+        let send_result = if let Message::Send(ref send_result) = self.send_result {
+            send_result
+        } else {
+            unreachable!();
+        };
+
+        let duration_divisor = if send_result.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
             1.0
         } else {
-            self.duration
+            send_result.duration
         };
 
-        let bytes_per_second = self.bytes_sent as f32 / duration_divisor;
+        let bytes_per_second = send_result.bytes_sent as f32 / duration_divisor;
 
         let throughput = match bit {
             true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
 
+        let stream_idx = send_result.stream_idx.unwrap();
         let mut output = format!(
             "----------\n\
             TCP send result over {:.2}s | stream: {}\n\
             bytes: {} | per second: {:.3} | {}",
-            self.duration, self.stream_idx, self.bytes_sent, bytes_per_second, throughput,
+            send_result.duration, stream_idx, send_result.bytes_sent, bytes_per_second, throughput,
         );
-        if self.sends_blocked > 0 {
-            output.push_str(&format!("\nstalls due to full send-buffer: {}", self.sends_blocked));
+        let sends_blocked = send_result.sends_blocked.unwrap();
+        if sends_blocked > 0 {
+            output.push_str(&format!("\nstalls due to full send-buffer: {}", sends_blocked));
         }
         output
     }
@@ -326,6 +350,7 @@ pub struct UdpReceiveResult {
     pub unbroken_sequence: u64,
     pub jitter_seconds: Option<f32>,
 }
+
 impl UdpReceiveResult {
     fn from_json(value: serde_json::Value) -> BoxResult<UdpReceiveResult> {
         let receive_result: UdpReceiveResult = serde_json::from_value(value)?;
@@ -559,6 +584,12 @@ impl StreamResults for TcpStreamResults {
             if i < omit_seconds {
                 continue;
             }
+
+            let sr = if let Message::Send(ref sr) = sr.send_result {
+                sr
+            } else {
+                unreachable!();
+            };
 
             duration_send += sr.duration as f64;
             bytes_sent += sr.bytes_sent;
@@ -839,6 +870,11 @@ impl TestResults for TcpTestResults {
                 if i < omit_seconds {
                     continue;
                 }
+                let sr = if let Message::Send(ref sr) = sr.send_result {
+                    sr
+                } else {
+                    unreachable!();
+                };
 
                 duration_send += sr.duration as f64;
                 bytes_sent += sr.bytes_sent;
@@ -894,12 +930,18 @@ impl TestResults for TcpTestResults {
                     continue;
                 }
 
+                let sr = if let Message::Send(ref sr) = sr.send_result {
+                    sr
+                } else {
+                    unreachable!();
+                };
+
                 duration_send += sr.duration as f64;
                 stream_send_durations[stream_idx] += sr.duration as f64;
 
                 bytes_sent += sr.bytes_sent;
 
-                sends_blocked |= sr.sends_blocked > 0;
+                sends_blocked |= sr.sends_blocked.unwrap() > 0;
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {

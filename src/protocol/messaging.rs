@@ -19,35 +19,82 @@
  */
 
 use crate::BoxResult;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct Configuration {
+    pub family: Option<String>,
+    pub length: u32,
+    pub receive_buffer: Option<u32>,
+    pub role: String,
+    pub streams: u8,
+    pub test_id: Vec<u8>,
+    pub bandwidth: Option<u64>,
+    pub duration: Option<f32>,
+    pub send_interval: Option<f32>,
+    pub send_buffer: Option<u32>,
+    pub no_delay: Option<bool>,
+    pub stream_ports: Option<Vec<u16>>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct SendResult {
+    pub timestamp: f64,
+    pub stream_idx: Option<u8>,
+    pub duration: f32,
+    pub bytes_sent: u64,
+    pub sends_blocked: Option<u64>,
+    pub family: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(tag = "kind")]
+pub enum Message {
+    #[serde(rename(deserialize = "configuration", serialize = "configuration"))]
+    Configuration(Configuration),
+    #[serde(rename(deserialize = "connect", serialize = "connect"))]
+    Connect { stream_ports: Vec<u16> },
+    #[serde(rename(deserialize = "connect-ready", serialize = "connect-ready"))]
+    ConnectReady,
+    #[serde(rename(deserialize = "begin", serialize = "begin"))]
+    Begin,
+    #[serde(rename(deserialize = "send", serialize = "send"))]
+    Send(SendResult),
+    #[serde(rename(deserialize = "receive", serialize = "receive"))]
+    Receive {
+        bytes_received: usize,
+        duration: f64,
+        family: String,
+        stream_idx: usize,
+        timestamp: f64,
+    },
+    #[serde(rename(deserialize = "done", serialize = "done"))]
+    Done { origin: String, stream_idx: usize },
+    #[serde(rename(deserialize = "end", serialize = "end"))]
+    End,
+}
 
 /// prepares a message used to tell the server to begin operations
 pub fn prepare_begin() -> serde_json::Value {
-    serde_json::json!({
-        "kind": "begin",
-    })
+    serde_json::to_value(Message::Begin).unwrap()
 }
 
 /// prepares a message used to tell the client to connect its test-streams
 pub fn prepare_connect(stream_ports: &[u16]) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "connect",
-
-        "stream_ports": stream_ports,
-    })
+    let msg = Message::Connect {
+        stream_ports: stream_ports.to_vec(),
+    };
+    serde_json::to_value(msg).unwrap()
 }
 
 /// prepares a message used to tell the client that the server is ready to connect to its test-streams
 pub fn prepare_connect_ready() -> serde_json::Value {
-    serde_json::json!({
-        "kind": "connect-ready",
-    })
+    serde_json::to_value(Message::ConnectReady).unwrap()
 }
 
 /// prepares a message used to tell the server that testing is finished
 pub fn prepare_end() -> serde_json::Value {
-    serde_json::json!({
-        "kind": "end",
-    })
+    serde_json::to_value(Message::End).unwrap()
 }
 
 /// prepares a message used to describe the upload role of a TCP test
@@ -61,40 +108,39 @@ fn prepare_configuration_tcp_upload(
     send_interval: f32,
     send_buffer: u32,
     no_delay: bool,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "configuration",
-
-        "family": "tcp",
-        "role": "upload",
-
-        "test_id": test_id,
-        "streams": validate_streams(streams),
-
-        "bandwidth": validate_bandwidth(bandwidth),
-        "duration": seconds,
-        "length": calculate_length_tcp(length),
-        "send_interval": validate_send_interval(send_interval),
-
-        "send_buffer": send_buffer,
-        "no_delay": no_delay,
-    })
+) -> Configuration {
+    Configuration {
+        family: Some("tcp".to_string()),
+        role: "upload".to_string(),
+        test_id: test_id.to_vec(),
+        streams: validate_streams(streams),
+        bandwidth: Some(validate_bandwidth(bandwidth)),
+        duration: Some(seconds),
+        length: calculate_length_tcp(length) as u32,
+        send_interval: Some(validate_send_interval(send_interval)),
+        send_buffer: Some(send_buffer),
+        no_delay: Some(no_delay),
+        receive_buffer: Some(0),
+        stream_ports: None,
+    }
 }
 
 /// prepares a message used to describe the download role of a TCP test
-fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: u8, length: usize, receive_buffer: u32) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "configuration",
-
-        "family": "tcp",
-        "role": "download",
-
-        "test_id": test_id,
-        "streams": validate_streams(streams),
-
-        "length": calculate_length_tcp(length),
-        "receive_buffer": receive_buffer,
-    })
+fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: u8, length: usize, receive_buffer: u32) -> Configuration {
+    Configuration {
+        family: Some("tcp".to_string()),
+        role: "download".to_string(),
+        test_id: test_id.to_vec(),
+        streams: validate_streams(streams),
+        bandwidth: None,
+        duration: None,
+        length: calculate_length_tcp(length) as u32,
+        send_interval: None,
+        send_buffer: None,
+        no_delay: None,
+        receive_buffer: Some(receive_buffer),
+        stream_ports: None,
+    }
 }
 
 /// prepares a message used to describe the upload role of a UDP test
@@ -106,39 +152,39 @@ fn prepare_configuration_udp_upload(
     length: u16,
     send_interval: f32,
     send_buffer: u32,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "configuration",
-
-        "family": "udp",
-        "role": "upload",
-
-        "test_id": test_id,
-        "streams": validate_streams(streams),
-
-        "bandwidth": validate_bandwidth(bandwidth),
-        "duration": seconds,
-        "length": calculate_length_udp(length),
-        "send_interval": validate_send_interval(send_interval),
-
-        "send_buffer": send_buffer,
-    })
+) -> Configuration {
+    Configuration {
+        family: Some("udp".to_string()),
+        role: "upload".to_string(),
+        test_id: test_id.to_vec(),
+        streams: validate_streams(streams),
+        bandwidth: Some(validate_bandwidth(bandwidth)),
+        duration: Some(seconds),
+        length: calculate_length_udp(length) as u32,
+        send_interval: Some(validate_send_interval(send_interval)),
+        send_buffer: Some(send_buffer),
+        no_delay: None,
+        receive_buffer: None,
+        stream_ports: None,
+    }
 }
 
 /// prepares a message used to describe the download role of a UDP test
-fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: u8, length: u16, receive_buffer: u32) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "configuration",
-
-        "family": "udp",
-        "role": "download",
-
-        "test_id": test_id,
-        "streams": validate_streams(streams),
-
-        "length": calculate_length_udp(length),
-        "receive_buffer": receive_buffer,
-    })
+fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: u8, length: u16, receive_buffer: u32) -> Configuration {
+    Configuration {
+        family: Some("udp".to_string()),
+        role: "download".to_string(),
+        test_id: test_id.to_vec(),
+        streams: validate_streams(streams),
+        bandwidth: None,
+        duration: None,
+        length: calculate_length_udp(length) as u32,
+        send_interval: None,
+        send_buffer: None,
+        no_delay: None,
+        receive_buffer: Some(receive_buffer),
+        stream_ports: None,
+    }
 }
 
 fn validate_streams(streams: u8) -> u8 {
@@ -186,7 +232,7 @@ fn calculate_length_udp(length: u16) -> u16 {
 }
 
 /// prepares a message used to describe the upload role in a test
-pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<serde_json::Value> {
+pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<Configuration> {
     let parallel_streams: u8 = args.parallel as u8;
     let mut seconds: f32 = args.time as f32;
     let mut send_interval: f32 = args.send_interval as f32;
@@ -313,7 +359,7 @@ pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]
     }
 }
 /// prepares a message used to describe the download role in a test
-pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<serde_json::Value> {
+pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<Configuration> {
     let parallel_streams: u8 = args.parallel as u8;
     let mut length: u32 = args.length as u32;
     let mut receive_buffer: u32 = args.receive_buffer as u32;
@@ -357,4 +403,31 @@ pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 1
             receive_buffer,
         ))
     }
+}
+
+#[test]
+fn test_prepare_configuration_tcp_upload() {
+    let test_id: [u8; 16] = [0; 16];
+    let streams: u8 = 1;
+    let bandwidth: u64 = 1024;
+    let seconds: f32 = 1.0;
+    let length: usize = 1024;
+    let send_interval: f32 = 1.0;
+    let send_buffer: u32 = 1024;
+    let no_delay: bool = false;
+
+    let cfg = prepare_configuration_tcp_upload(&test_id, streams, bandwidth, seconds, length, send_interval, send_buffer, no_delay);
+    let msg = serde_json::to_value(Message::Configuration(cfg)).unwrap();
+    assert_eq!(msg["kind"], "configuration");
+    assert_eq!(msg["family"], "tcp");
+    assert_eq!(msg["role"], "upload");
+    assert_eq!(msg["test_id"], serde_json::json!(test_id));
+    assert_eq!(msg["streams"], streams);
+    assert_eq!(msg["bandwidth"], bandwidth);
+    assert_eq!(msg["duration"], seconds);
+    assert_eq!(msg["length"], length as u32);
+    assert_eq!(msg["send_interval"], send_interval);
+    assert_eq!(msg["send_buffer"], send_buffer);
+    assert_eq!(msg["no_delay"], no_delay);
+    assert_eq!(msg["receive_buffer"], 0);
 }

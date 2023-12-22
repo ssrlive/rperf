@@ -19,7 +19,10 @@
  */
 
 use crate::{
-    protocol::results::{get_unix_timestamp, UdpReceiveResult, UdpSendResult},
+    protocol::{
+        messaging::Configuration,
+        results::{get_unix_timestamp, UdpReceiveResult, UdpSendResult},
+    },
     BoxResult,
 };
 
@@ -38,28 +41,17 @@ pub struct UdpTestDefinition {
     pub length: u16,
 }
 impl UdpTestDefinition {
-    pub fn new(details: &serde_json::Value) -> BoxResult<UdpTestDefinition> {
+    pub fn new(cfg: &Configuration) -> BoxResult<UdpTestDefinition> {
         let mut test_id_bytes = [0_u8; 16];
-        for (i, v) in details
-            .get("test_id")
-            .unwrap_or(&serde_json::json!([]))
-            .as_array()
-            .unwrap()
-            .iter()
-            .enumerate()
-        {
+        for (i, &v) in cfg.test_id.iter().enumerate() {
             if i >= 16 {
                 //avoid out-of-bounds if given malicious data
                 break;
             }
-            test_id_bytes[i] = v.as_i64().unwrap_or(0) as u8;
+            test_id_bytes[i] = v;
         }
 
-        let length = details
-            .get("length")
-            .unwrap_or(&serde_json::json!(TEST_HEADER_SIZE))
-            .as_i64()
-            .unwrap() as u16;
+        let length = cfg.length as u16;
         if length < TEST_HEADER_SIZE {
             return Err(Box::new(simple_error::simple_error!(std::format!(
                 "{} is too short of a length to satisfy testing requirements",
@@ -67,9 +59,11 @@ impl UdpTestDefinition {
             ))));
         }
 
+        let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
+
         Ok(UdpTestDefinition {
             test_id: test_id_bytes,
-            bandwidth: details.get("bandwidth").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as u64,
+            bandwidth,
             length,
         })
     }

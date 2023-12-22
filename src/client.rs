@@ -22,7 +22,7 @@ use crate::{
     args,
     protocol::{
         communication::{receive, send},
-        messaging::{prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration},
+        messaging::{prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration, Message},
         results::{ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
@@ -126,14 +126,14 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
     let test_id = uuid::Uuid::new_v4();
     let mut upload_config = prepare_upload_configuration(args, test_id.as_bytes())?;
-    let mut download_config = prepare_download_configuration(args, test_id.as_bytes())?;
+    let download_config = prepare_download_configuration(args, test_id.as_bytes())?;
 
     //connect to the server
     let mut stream = connect_to_server(&args.client.unwrap().to_string(), &args.port)?;
     let server_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this test
-    let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
+    let stream_count = download_config.streams as usize;
     let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx): (
@@ -202,7 +202,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                     &(stream_idx as u8),
                     &mut udp_port_pool,
                     &server_addr.ip(),
-                    &(download_config["receive_buffer"].as_i64().unwrap() as usize),
+                    &(*download_config.receive_buffer.as_ref().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -222,12 +222,16 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         }
 
         //add the port-list to the upload-config that the server will receive; this is in stream-index order
-        upload_config["stream_ports"] = serde_json::json!(stream_ports);
+        upload_config.stream_ports = Some(stream_ports);
+
+        let upload_config = serde_json::to_value(Message::Configuration(upload_config.clone()))?;
 
         //let the server know what we're expecting
         send(&mut stream, &upload_config)?;
     } else {
         log::debug!("running in forward-mode: server will be receiving data");
+
+        let download_config = serde_json::to_value(Message::Configuration(download_config.clone()))?;
 
         //let the server know to prepare for us to connect
         send(&mut stream, &download_config)?;
@@ -261,9 +265,9 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                                 &0,
                                 &server_addr.ip(),
                                 &(port.as_i64().unwrap() as u16),
-                                &(upload_config["duration"].as_f64().unwrap() as f32),
-                                &(upload_config["send_interval"].as_f64().unwrap() as f32),
-                                &(upload_config["send_buffer"].as_i64().unwrap() as usize),
+                                &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
+                                &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
+                                &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -286,10 +290,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                                 &(stream_idx as u8),
                                 &server_addr.ip(),
                                 &(port.as_i64().unwrap() as u16),
-                                &(upload_config["duration"].as_f64().unwrap() as f32),
-                                &(upload_config["send_interval"].as_f64().unwrap() as f32),
-                                &(upload_config["send_buffer"].as_i64().unwrap() as usize),
-                                &(upload_config["no_delay"].as_bool().unwrap()),
+                                &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
+                                &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
+                                &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
+                                upload_config.no_delay.as_ref().unwrap_or(&false),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -480,6 +484,9 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             Err(e) => log::error!("error in parallel stream: {:?}", e),
         }
     }
+
+    let mut upload_config = serde_json::to_value(Message::Configuration(upload_config))?;
+    let mut download_config = serde_json::to_value(Message::Configuration(download_config))?;
 
     let common_config: serde_json::Value;
     //sanitise the config structures for export

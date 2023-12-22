@@ -29,7 +29,7 @@ use std::net::{TcpListener, TcpStream};
 
 use crate::args::Args;
 use crate::protocol::communication::{receive, send};
-use crate::protocol::messaging::{prepare_connect, prepare_connect_ready};
+use crate::protocol::messaging::{prepare_connect, prepare_connect_ready, Message};
 use crate::protocol::results::{IntervalResultBox, ServerDoneResult};
 use crate::stream::{tcp, udp, TestStream};
 use crate::BoxResult;
@@ -71,36 +71,32 @@ fn handle_client(
     //server operations are entirely driven by client-signalling, making this a (simple) state-machine
     while is_alive() {
         let payload = receive(stream, is_alive, &mut results_handler)?;
-        let kind = if let Some(kind) = payload.get("kind") {
-            kind
-        } else {
-            log::error!("[{}] invalid data", &peer_addr);
-            break;
-        };
-        match kind.as_str().unwrap() {
-            "configuration" => {
+        let msg: Message = serde_json::from_value(payload)?;
+
+        match &msg {
+            Message::Configuration(cfg) => {
                 //we either need to connect streams to the client or prepare to receive connections
-                if payload.get("role").unwrap_or(&serde_json::json!("download")).as_str().unwrap() == "download" {
+                if cfg.role == "download" {
                     log::info!("[{}] running in forward-mode: server will be receiving data", &peer_addr);
 
-                    let stream_count = payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap();
+                    let stream_count = cfg.streams;
                     //since we're receiving data, we're also responsible for letting the client know where to send it
                     let mut stream_ports = Vec::with_capacity(stream_count as usize);
 
-                    if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
+                    if cfg.family.as_ref().unwrap() == "udp" {
                         log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_count);
 
                         let mut c_udp_port_pool = udp_port_pool.lock().unwrap();
 
-                        let test_definition = udp::UdpTestDefinition::new(&payload)?;
+                        let test_definition = udp::UdpTestDefinition::new(cfg)?;
                         for stream_idx in 0..stream_count {
                             log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
                             let test = udp::receiver::UdpReceiver::new(
                                 test_definition.clone(),
-                                &(stream_idx as u8),
+                                &(stream_idx),
                                 &mut c_udp_port_pool,
                                 &peer_addr.ip(),
-                                &(payload["receive_buffer"].as_i64().unwrap() as usize),
+                                &(cfg.receive_buffer.unwrap_or(0) as usize),
                             )?;
                             stream_ports.push(test.get_port()?);
                             parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -111,12 +107,12 @@ fn handle_client(
 
                         let mut c_tcp_port_pool = tcp_port_pool.lock().unwrap();
 
-                        let test_definition = tcp::TcpTestDefinition::new(&payload)?;
+                        let test_definition = tcp::TcpTestDefinition::new(cfg)?;
                         for stream_idx in 0..stream_count {
                             log::debug!("[{}] preparing TCP-receiver for stream {}...", &peer_addr, stream_idx);
                             let test = tcp::receiver::TcpReceiver::new(
                                 test_definition.clone(),
-                                &(stream_idx as u8),
+                                &(stream_idx),
                                 &mut c_tcp_port_pool,
                                 &peer_addr.ip(),
                             )?;
@@ -131,12 +127,13 @@ fn handle_client(
                     //upload
                     log::info!("[{}] running in reverse-mode: server will be uploading data", &peer_addr);
 
-                    let stream_ports = payload.get("stream_ports").unwrap().as_array().unwrap();
+                    let dummy = Vec::new();
+                    let stream_ports = cfg.stream_ports.as_ref().unwrap_or(&dummy);
 
-                    if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
+                    if cfg.family.as_ref().unwrap() == "udp" {
                         log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_ports.len());
 
-                        let test_definition = udp::UdpTestDefinition::new(&payload)?;
+                        let test_definition = udp::UdpTestDefinition::new(cfg)?;
                         for (stream_idx, port) in stream_ports.iter().enumerate() {
                             log::debug!("[{}] preparing UDP-sender for stream {}...", &peer_addr, stream_idx);
                             let test = udp::sender::UdpSender::new(
@@ -144,10 +141,10 @@ fn handle_client(
                                 &(stream_idx as u8),
                                 &0,
                                 &peer_addr.ip(),
-                                &(port.as_i64().unwrap_or(0) as u16),
-                                &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
-                                &(payload.get("send_interval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
-                                &(payload["send_buffer"].as_i64().unwrap() as usize),
+                                port,
+                                cfg.duration.as_ref().unwrap_or(&0.0),
+                                cfg.send_interval.as_ref().unwrap_or(&1.0),
+                                &(*cfg.send_buffer.as_ref().unwrap_or(&0) as usize),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -155,18 +152,18 @@ fn handle_client(
                         //TCP
                         log::info!("[{}] preparing for TCP test with {} streams...", &peer_addr, stream_ports.len());
 
-                        let test_definition = tcp::TcpTestDefinition::new(&payload)?;
+                        let test_definition = tcp::TcpTestDefinition::new(cfg)?;
                         for (stream_idx, port) in stream_ports.iter().enumerate() {
                             log::debug!("[{}] preparing TCP-sender for stream {}...", &peer_addr, stream_idx);
                             let test = tcp::sender::TcpSender::new(
                                 test_definition.clone(),
                                 &(stream_idx as u8),
                                 &peer_addr.ip(),
-                                &(port.as_i64().unwrap() as u16),
-                                &(payload["duration"].as_f64().unwrap() as f32),
-                                &(payload["send_interval"].as_f64().unwrap() as f32),
-                                &(payload["send_buffer"].as_i64().unwrap() as usize),
-                                &(payload["no_delay"].as_bool().unwrap()),
+                                port,
+                                cfg.duration.as_ref().unwrap_or(&0.0),
+                                cfg.send_interval.as_ref().unwrap_or(&1.0),
+                                &(*cfg.send_buffer.as_ref().unwrap_or(&0) as usize),
+                                cfg.no_delay.as_ref().unwrap_or(&false),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -176,7 +173,7 @@ fn handle_client(
                     send(stream, &prepare_connect_ready())?;
                 }
             }
-            "begin" => {
+            Message::Begin => {
                 //the client has indicated that testing can begin
                 if !started {
                     //a simple guard to protect against reinitialisaion
@@ -236,7 +233,7 @@ fn handle_client(
                     break;
                 }
             }
-            "end" => {
+            Message::End => {
                 //the client has indicated that testing is done; stop cleanly
                 log::info!("[{}] end of testing signaled", &peer_addr);
                 break;
