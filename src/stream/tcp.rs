@@ -51,10 +51,8 @@ impl TcpTestDefinition {
 
         let length = cfg.length as usize;
         if length < TEST_HEADER_SIZE {
-            return Err(Box::new(simple_error::simple_error!(std::format!(
-                "{} is too short of a length to satisfy testing requirements",
-                length
-            ))));
+            let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
+            return Err(Box::new(simple_error::simple_error!(err)));
         }
 
         let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);

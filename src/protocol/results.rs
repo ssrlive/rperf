@@ -179,10 +179,8 @@ impl TcpReceiveResult {
         let mut receive_result = msg.clone();
         if let Message::Receive(ref mut receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("tcp") {
-                return Err(Box::new(simple_error::simple_error!(
-                    "not a TCP receive-result: {:?}",
-                    receive_result.family
-                )));
+                let err = format!("not a TCP receive-result: {:?}", receive_result.family);
+                return Err(Box::new(simple_error::simple_error!(err)));
             }
         } else {
             return Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result")));
@@ -271,10 +269,8 @@ impl TcpSendResult {
             }
 
             if send_result.family.as_deref() != Some("tcp") {
-                return Err(Box::new(simple_error::simple_error!(
-                    "not a TCP send-result: {:?}",
-                    send_result.family
-                )));
+                let err = format!("not a TCP send-result: {:?}", send_result.family);
+                return Err(Box::new(simple_error::simple_error!(err)));
             }
         } else {
             return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
@@ -362,10 +358,8 @@ impl UdpReceiveResult {
         let receive_result = msg.clone();
         if let Message::Receive(ref receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("udp") {
-                return Err(Box::new(simple_error::simple_error!(
-                    "not a UDP send-result: {:?}",
-                    receive_result.family
-                )));
+                let err = format!("not a UDP send-result: {:?}", receive_result.family);
+                return Err(Box::new(simple_error::simple_error!(err)));
             }
         } else {
             return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
@@ -468,10 +462,8 @@ impl UdpSendResult {
             }
 
             if send_result.family.as_deref() != Some("udp") {
-                return Err(Box::new(simple_error::simple_error!(
-                    "not a UDP send-result: {:?}",
-                    send_result.family
-                )));
+                let err = format!("not a UDP send-result: {:?}", send_result.family);
+                return Err(Box::new(simple_error::simple_error!(err)));
             }
         } else {
             return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
