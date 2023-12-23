@@ -1,11 +1,12 @@
 pub mod args;
 pub mod client;
+mod error;
 pub(crate) mod protocol;
 pub mod server;
 pub(crate) mod stream;
 pub(crate) mod utils;
 
-pub type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+pub use error::{BoxResult, Error, Result};
 
 /// a global token generator
 pub(crate) fn get_global_token() -> mio::Token {

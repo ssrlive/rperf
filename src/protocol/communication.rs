@@ -23,7 +23,7 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use crate::protocol::messaging::Message;
-use crate::BoxResult;
+use crate::{error_gen, BoxResult};
 
 /// how long to wait for keepalive events
 /// the communications channels typically exchange data every second, so 2s is reasonable to avoid excess noise
@@ -72,7 +72,7 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
             }
         }
     }
-    let err = simple_error::simple_error!("timed out while attempting to send status-message to {}", stream.peer_addr()?);
+    let err = error_gen!("timed out while attempting to send status-message to {}", stream.peer_addr()?);
     Err(Box::new(err))
 }
 
@@ -98,10 +98,10 @@ fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, handler: &m
         };
         if size == 0 {
             if alive_check() {
-                return Err(Box::new(simple_error::simple_error!("connection lost")));
+                return Err(Box::new(error_gen!("connection lost")));
             } else {
                 // shutting down; a disconnect is expected
-                return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                return Err(Box::new(error_gen!("local shutdown requested")));
             }
         }
 
@@ -114,7 +114,7 @@ fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, handler: &m
             log::debug!("received partial length-spec from {}", stream.peer_addr()?);
         }
     }
-    Err(Box::new(simple_error::simple_error!("system shutting down")))
+    Err(Box::new(error_gen!("system shutting down")))
 }
 
 /// receives the data-value of a pending message over a client-server communications stream
@@ -144,10 +144,10 @@ fn receive_payload(
         };
         if size == 0 {
             if alive_check() {
-                return Err(Box::new(simple_error::simple_error!("connection lost")));
+                return Err(Box::new(error_gen!("connection lost")));
             } else {
                 //shutting down; a disconnect is expected
-                return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                return Err(Box::new(error_gen!("local shutdown requested")));
             }
         }
 
@@ -166,7 +166,7 @@ fn receive_payload(
             log::debug!("received partial payload from {}", stream.peer_addr()?);
         }
     }
-    Err(Box::new(simple_error::simple_error!("system shutting down")))
+    Err(Box::new(error_gen!("system shutting down")))
 }
 
 /// handles the full process of retrieving a message from a client-server communications stream

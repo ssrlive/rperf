@@ -19,6 +19,7 @@
  */
 
 use crate::{
+    error_gen,
     protocol::{
         messaging::Configuration,
         results::{get_unix_timestamp, UdpReceiveResult, UdpSendResult},
@@ -54,7 +55,7 @@ impl UdpTestDefinition {
         let length = cfg.length as u16;
         if length < TEST_HEADER_SIZE {
             let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
-            return Err(Box::new(simple_error::simple_error!(err)));
+            return Err(Box::new(error_gen!(err)));
         }
 
         let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
@@ -70,7 +71,7 @@ impl UdpTestDefinition {
 pub mod receiver {
     use crate::protocol::messaging::{Message, TransmitState};
     use crate::protocol::results::IntervalResultBox;
-    use crate::BoxResult;
+    use crate::{error_gen, BoxResult};
     use chrono::NaiveDateTime;
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -147,7 +148,7 @@ pub mod receiver {
                             }
                         }
                     }
-                    Err(Box::new(simple_error::simple_error!("unable to allocate IPv6 UDP port")))
+                    Err(Box::new(error_gen!("unable to allocate IPv6 UDP port")))
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
@@ -179,7 +180,7 @@ pub mod receiver {
                             }
                         }
                     }
-                    Err(Box::new(simple_error::simple_error!("unable to allocate IPv4 UDP port")))
+                    Err(Box::new(error_gen!("unable to allocate IPv4 UDP port")))
                 }
             }
         }

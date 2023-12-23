@@ -21,7 +21,7 @@
 use crate::protocol::messaging::Configuration;
 use crate::protocol::results::{get_unix_timestamp, TcpReceiveResult, TcpSendResult};
 use crate::stream::{parse_port_spec, TestStream, INTERVAL};
-use crate::BoxResult;
+use crate::{error_gen, BoxResult};
 
 pub const TEST_HEADER_SIZE: usize = 16;
 
@@ -52,7 +52,7 @@ impl TcpTestDefinition {
         let length = cfg.length as usize;
         if length < TEST_HEADER_SIZE {
             let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
-            return Err(Box::new(simple_error::simple_error!(err)));
+            return Err(Box::new(error_gen!(err)));
         }
 
         let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
@@ -73,6 +73,7 @@ pub mod receiver {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
+    use crate::error_gen;
     use crate::protocol::messaging::{Message, TransmitState};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
@@ -147,7 +148,7 @@ pub mod receiver {
                             }
                         }
                     }
-                    Err(Box::new(simple_error::simple_error!("unable to allocate IPv6 TCP port")))
+                    Err(Box::new(error_gen!("unable to allocate IPv6 TCP port")))
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
@@ -179,7 +180,7 @@ pub mod receiver {
                             }
                         }
                     }
-                    Err(Box::new(simple_error::simple_error!("unable to allocate IPv4 TCP port")))
+                    Err(Box::new(error_gen!("unable to allocate IPv4 TCP port")))
                 }
             }
         }
@@ -239,11 +240,10 @@ pub mod receiver {
 
             loop {
                 if !self.active.load(Relaxed) {
-                    return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                    return Err(Box::new(error_gen!("local shutdown requested")));
                 }
                 if start.elapsed() >= RECEIVE_TIMEOUT {
-                    let err = simple_error::simple_error!("TCP listening for stream {} timed out", self.stream_idx);
-                    return Err(Box::new(err));
+                    return Err(Box::new(error_gen!("TCP listening for stream {} timed out", self.stream_idx)));
                 }
 
                 // assigned upon establishing a connection
@@ -447,7 +447,7 @@ pub mod receiver {
                 Some(listener) => Ok(listener.local_addr()?.port()),
                 None => match &self.stream {
                     Some(stream) => Ok(stream.local_addr()?.port()),
-                    None => Err(Box::new(simple_error::simple_error!("no port currently bound"))),
+                    None => Err(Box::new(error_gen!("no port currently bound"))),
                 },
             }
         }
@@ -468,6 +468,7 @@ pub mod sender {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
+    use crate::error_gen;
     use crate::protocol::messaging::{Message, TransmitState};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
@@ -537,8 +538,7 @@ pub mod sender {
             let stream = match TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
                 Ok(s) => s,
                 Err(e) => {
-                    let err = simple_error::simple_error!("unable to connect stream {}: {}", self.stream_idx, e);
-                    return Err(Box::new(err));
+                    return Err(Box::new(error_gen!("unable to connect stream {}: {}", self.stream_idx, e)));
                 }
             };
 
@@ -708,7 +708,7 @@ pub mod sender {
         fn get_port(&self) -> BoxResult<u16> {
             match &self.stream {
                 Some(stream) => Ok(stream.local_addr()?.port()),
-                None => Err(Box::new(simple_error::simple_error!("no stream currently exists"))),
+                None => Err(Box::new(error_gen!("no stream currently exists"))),
             }
         }
 

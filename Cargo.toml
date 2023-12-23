@@ -20,8 +20,8 @@ log = { version = "0.4", features = ["std"] }
 mio = { version = "0.8", features = ["log", "os-poll", "net"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-simple-error = "0.3"
 socket2 = { version = "0.5", features = ["all"] }
+thiserror = "1.0"
 uuid = { version = "1.6", features = ["v4"] }
 
 #configuration for cargo-deb

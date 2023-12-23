@@ -19,7 +19,7 @@
  */
 
 use crate::protocol::messaging::{FinalState, Message};
-use crate::BoxResult;
+use crate::{error_gen, BoxResult};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -180,10 +180,10 @@ impl TcpReceiveResult {
         if let Message::Receive(ref mut receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("tcp") {
                 let err = format!("not a TCP receive-result: {:?}", receive_result.family);
-                return Err(Box::new(simple_error::simple_error!(err)));
+                return Err(Box::new(error_gen!(err)));
             }
         } else {
-            return Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result")));
+            return Err(Box::new(error_gen!("no kind specified for TCP stream-result")));
         }
         Ok(TcpReceiveResult { receive_result })
     }
@@ -270,10 +270,10 @@ impl TcpSendResult {
 
             if send_result.family.as_deref() != Some("tcp") {
                 let err = format!("not a TCP send-result: {:?}", send_result.family);
-                return Err(Box::new(simple_error::simple_error!(err)));
+                return Err(Box::new(error_gen!(err)));
             }
         } else {
-            return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
+            return Err(Box::new(error_gen!("no kind specified for UDP stream-result")));
         }
         Ok(TcpSendResult { send_result })
     }
@@ -359,10 +359,10 @@ impl UdpReceiveResult {
         if let Message::Receive(ref receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("udp") {
                 let err = format!("not a UDP send-result: {:?}", receive_result.family);
-                return Err(Box::new(simple_error::simple_error!(err)));
+                return Err(Box::new(error_gen!(err)));
             }
         } else {
-            return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
+            return Err(Box::new(error_gen!("no kind specified for UDP stream-result")));
         }
         Ok(UdpReceiveResult { receive_result })
     }
@@ -463,10 +463,10 @@ impl UdpSendResult {
 
             if send_result.family.as_deref() != Some("udp") {
                 let err = format!("not a UDP send-result: {:?}", send_result.family);
-                return Err(Box::new(simple_error::simple_error!(err)));
+                return Err(Box::new(error_gen!(err)));
             }
         } else {
-            return Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result")));
+            return Err(Box::new(error_gen!("no kind specified for UDP stream-result")));
         }
         Ok(UdpSendResult { send_result })
     }
@@ -554,7 +554,7 @@ pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBo
             } else if res.family.as_deref() == Some("udp") {
                 Ok(Box::new(UdpReceiveResult::from_message(msg)?))
             } else {
-                Err(Box::new(simple_error::simple_error!("unsupported interval-result family")))
+                Err(Box::new(error_gen!("unsupported interval-result family")))
             }
         }
         Message::Send(res) => {
@@ -563,10 +563,10 @@ pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBo
             } else if res.family.as_deref() == Some("udp") {
                 Ok(Box::new(UdpSendResult::from_message(msg)?))
             } else {
-                Err(Box::new(simple_error::simple_error!("unsupported interval-result family")))
+                Err(Box::new(error_gen!("unsupported interval-result family")))
             }
         }
-        _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind"))),
+        _ => Err(Box::new(error_gen!("unsupported interval-result kind"))),
     }
 }
 
@@ -586,11 +586,7 @@ impl StreamResults for TcpStreamResults {
         match msg {
             Message::Receive(_) => self.receive_results.push(TcpReceiveResult { receive_result: msg }),
             Message::Send(_) => self.send_results.push(TcpSendResult { send_result: msg }),
-            _ => {
-                return Err(Box::new(simple_error::simple_error!(
-                    "unsupported message type for TCP stream-result"
-                )))
-            }
+            _ => return Err(Box::new(error_gen!("unsupported message type for TCP stream-result"))),
         }
         Ok(())
     }
@@ -656,8 +652,7 @@ impl StreamResults for UdpStreamResults {
             Message::Receive(_) => self.receive_results.push(UdpReceiveResult { receive_result: msg }),
             Message::Send(_) => self.send_results.push(UdpSendResult { send_result: msg }),
             _ => {
-                let err = "unsupported message type for UDP stream-result";
-                return Err(Box::new(simple_error::simple_error!(err)));
+                return Err(Box::new(error_gen!("unsupported message type for UDP stream-result")));
             }
         }
         Ok(())
@@ -853,20 +848,13 @@ impl TestResults for TcpTestResults {
                             stream_results.update_from_message(msg)?;
                             Ok(())
                         }
-                        None => {
-                            let err = format!("stream-index {} is not a valid identifier", idx);
-                            Err(Box::new(simple_error::simple_error!(err)))
-                        }
+                        None => Err(Box::new(error_gen!("stream-index {} is not a valid identifier", idx))),
                     }
                 } else {
-                    let err = format!("unsupported family for TCP stream-result: {:?}", res.family);
-                    Err(Box::new(simple_error::simple_error!(err)))
+                    Err(Box::new(error_gen!("unsupported family for TCP stream-result: {:?}", res.family)))
                 }
             }
-            _ => {
-                let err = "unsupported message type for TCP stream-result";
-                Err(Box::new(simple_error::simple_error!(err)))
-            }
+            _ => Err(Box::new(error_gen!("unsupported message type for TCP stream-result"))),
         }
     }
 
@@ -1130,20 +1118,13 @@ impl TestResults for UdpTestResults {
                             stream_results.update_from_message(msg)?;
                             Ok(())
                         }
-                        None => {
-                            let err = format!("stream-index {} is not a valid identifier", idx);
-                            Err(Box::new(simple_error::simple_error!(err)))
-                        }
+                        None => Err(Box::new(error_gen!("stream-index {} is not a valid identifier", idx))),
                     }
                 } else {
-                    let err = format!("unsupported family for UDP stream-result: {:?}", res.family);
-                    Err(Box::new(simple_error::simple_error!(err)))
+                    Err(Box::new(error_gen!("unsupported family for UDP stream-result: {:?}", res.family)))
                 }
             }
-            _ => {
-                let err = "unsupported message type for UDP stream-result";
-                Err(Box::new(simple_error::simple_error!(err)))
-            }
+            _ => Err(Box::new(error_gen!("unsupported message type for UDP stream-result"))),
         }
     }
 

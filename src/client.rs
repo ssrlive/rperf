@@ -19,7 +19,7 @@
  */
 
 use crate::{
-    args,
+    args, error_gen,
     protocol::{
         communication::{receive, send},
         messaging::{prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration, Message},
@@ -55,11 +55,11 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
 
     let server_addr = destination.to_socket_addrs()?.next();
     if server_addr.is_none() {
-        return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
+        return Err(Box::new(error_gen!("unable to resolve {}", address)));
     }
     let stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
         Ok(s) => s,
-        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
+        Err(e) => return Err(Box::new(error_gen!("unable to connect: {}", e))),
     };
 
     log::debug!("connected TCP control-channel to {}", destination);
