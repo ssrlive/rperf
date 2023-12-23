@@ -117,18 +117,18 @@ pub mod receiver {
         }
 
         pub fn bind(&mut self, peer_ip: &IpAddr) -> BoxResult<UdpSocket> {
+            let ipv6addr_unspec = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+            let ipv4addr_unspec = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
-                        return Ok(UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                            .expect("failed to bind OS-assigned IPv6 UDP socket"));
+                        return Ok(UdpSocket::bind(SocketAddr::new(ipv6addr_unspec, 0))?);
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
 
                         for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result =
-                                UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            let listener_result = UdpSocket::bind(SocketAddr::new(ipv6addr_unspec, self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
@@ -138,8 +138,7 @@ pub mod receiver {
                         }
                         for port_idx in 0..=self.pos_ip6 {
                             //circle back to where the search started
-                            let listener_result =
-                                UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            let listener_result = UdpSocket::bind(SocketAddr::new(ipv6addr_unspec, self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
@@ -152,15 +151,13 @@ pub mod receiver {
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
-                        return Ok(UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
-                            .expect("failed to bind OS-assigned IPv4 UDP socket"));
+                        return Ok(UdpSocket::bind(SocketAddr::new(ipv4addr_unspec, 0))?);
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
 
                         for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result =
-                                UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            let listener_result = UdpSocket::bind(SocketAddr::new(ipv4addr_unspec, self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
@@ -170,8 +167,7 @@ pub mod receiver {
                         }
                         for port_idx in 0..=self.pos_ip4 {
                             //circle back to where the search started
-                            let listener_result =
-                                UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            let listener_result = UdpSocket::bind(SocketAddr::new(ipv4addr_unspec, self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
@@ -218,7 +214,7 @@ pub mod receiver {
             receive_buffer: &usize,
         ) -> BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
-            let socket: UdpSocket = port_pool.bind(peer_ip).expect("failed to bind UDP socket");
+            let socket: UdpSocket = port_pool.bind(peer_ip)?;
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
             // NOTE: features unsupported on Windows
             #[cfg(unix)]
@@ -280,13 +276,14 @@ pub mod receiver {
             false
         }
 
-        fn process_jitter(&mut self, timestamp: &NaiveDateTime, history: &mut UdpReceiverIntervalHistory) {
+        fn process_jitter(&mut self, timestamp: &NaiveDateTime, history: &mut UdpReceiverIntervalHistory) -> BoxResult<()> {
             /* this is a pretty straightforward implementation of RFC 1889, Appendix 8
              * it works on an assumption that the timestamp delta between sender and receiver
              * will remain effectively constant during the testing window
              */
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
-            let current_timestamp = NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos()).unwrap();
+            let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
+            let current_timestamp = NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos())
+                .ok_or(Box::new(error_gen!("unable to convert current timestamp to NaiveDateTime")))?;
 
             let time_delta = current_timestamp - *timestamp;
 
@@ -294,7 +291,7 @@ pub mod receiver {
                 Some(ns) => ns,
                 None => {
                     log::warn!("sender and receiver clocks are too out-of-sync to calculate jitter");
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -304,7 +301,8 @@ pub mod receiver {
 
                 if history.unbroken_sequence > 2 {
                     //normal jitter-calculation, per the RFC
-                    let mut jitter_seconds = history.jitter_seconds.unwrap(); //since we have a chain, this won't be None
+                    //since we have a chain, this won't be None
+                    let mut jitter_seconds = history.jitter_seconds.ok_or(Box::new(error_gen!("unable to calculate jitter")))?;
                     jitter_seconds += (delta_seconds - jitter_seconds) / 16.0;
                     history.jitter_seconds = Some(jitter_seconds);
                 } else {
@@ -314,6 +312,7 @@ pub mod receiver {
             }
             //update time-delta
             history.previous_time_delta_nanoseconds = time_delta_nanoseconds;
+            Ok(())
         }
 
         fn process_packet(&mut self, packet: &[u8], history: &mut UdpReceiverIntervalHistory) -> bool {
@@ -336,7 +335,7 @@ pub mod receiver {
                 let source_timestamp = NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).unwrap();
 
                 history.unbroken_sequence += 1;
-                self.process_jitter(&source_timestamp, history);
+                self.process_jitter(&source_timestamp, history).unwrap();
 
                 if history.unbroken_sequence > history.longest_unbroken_sequence {
                     history.longest_unbroken_sequence = history.unbroken_sequence;
@@ -503,10 +502,8 @@ pub mod sender {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
             let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
             let socket = match receiver_ip {
-                IpAddr::V6(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))
-                    .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port)),
-                IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))
-                    .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port)),
+                IpAddr::V6(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))?,
+                IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))?,
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             // NOTE: features unsupported on Windows
@@ -542,8 +539,8 @@ pub mod sender {
             })
         }
 
-        fn prepare_packet(&mut self) {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
+        fn prepare_packet(&mut self) -> BoxResult<()> {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
 
             //eight bytes after the test ID are the packet's ID, in big-endian order
             self.staged_packet[16..24].copy_from_slice(&self.next_packet_id.to_be_bytes());
@@ -551,6 +548,7 @@ pub mod sender {
             //the next eight are the seconds part of the UNIX timestamp and the following four are the nanoseconds
             self.staged_packet[24..32].copy_from_slice(&now.as_secs().to_be_bytes());
             self.staged_packet[32..36].copy_from_slice(&now.subsec_nanos().to_be_bytes());
+            Ok(())
         }
     }
     impl super::TestStream for UdpSender {
@@ -572,7 +570,7 @@ pub mod sender {
                 log::trace!("writing {} bytes in UDP stream {}...", self.staged_packet.len(), self.stream_idx);
                 let packet_start = Instant::now();
 
-                self.prepare_packet();
+                self.prepare_packet().ok()?;
                 match self.socket.send(&self.staged_packet) {
                     Ok(packet_size) => {
                         log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);

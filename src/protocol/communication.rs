@@ -78,7 +78,7 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
 
 /// receives the length-count of a pending message over a client-server communications stream
 fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, handler: &mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
-    stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
+    stream.set_read_timeout(Some(POLL_TIMEOUT))?;
 
     let mut length_bytes_read = 0;
     let mut length_spec: [u8; 2] = [0; 2];
@@ -124,7 +124,7 @@ fn receive_payload(
     results_handler: &mut dyn FnMut() -> BoxResult<()>,
     length: u16,
 ) -> BoxResult<serde_json::Value> {
-    stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
+    stream.set_read_timeout(Some(POLL_TIMEOUT))?;
 
     let mut bytes_read = 0;
     let mut buffer = vec![0_u8; length.into()];

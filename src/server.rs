@@ -30,8 +30,9 @@ use std::net::{TcpListener, TcpStream};
 use crate::args::Args;
 use crate::protocol::communication::{receive, send};
 use crate::protocol::messaging::{prepare_connect, prepare_connect_ready, Message};
-use crate::protocol::results::{IntervalResultBox, ServerDoneResult};
+use crate::protocol::results::{IntervalResultBox, ServerDoneResult, ServerFailedResult};
 use crate::stream::{tcp, udp, TestStream};
+use crate::utils::cpu_affinity::CpuAffinityManager;
 use crate::BoxResult;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
@@ -189,35 +190,29 @@ fn handle_client(
                             }
                             loop {
                                 let mut test = c_ps.lock().unwrap();
-                                log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, test.get_idx());
+                                let stream_idx = test.get_idx();
+                                log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, stream_idx);
                                 let interval_result = match test.run_interval() {
                                     Some(interval_result) => interval_result,
                                     None => {
-                                        match c_results_tx.send(Box::new(ServerDoneResult {
-                                            stream_idx: test.get_idx(),
-                                        })) {
-                                            Ok(_) => (),
-                                            Err(e) => log::error!("[{}] unable to report interval-done-result: {}", &peer_addr, e),
+                                        if let Err(err) = c_results_tx.send(Box::new(ServerDoneResult { stream_idx })) {
+                                            log::error!("[{}] unable to report interval-done-result: {}", &peer_addr, err);
                                         }
                                         break;
                                     }
                                 };
 
                                 match interval_result {
-                                    Ok(ir) => match c_results_tx.send(ir) {
-                                        Ok(_) => (),
-                                        Err(e) => {
+                                    Ok(ir) => {
+                                        if let Err(e) = c_results_tx.send(ir) {
                                             log::error!("[{}] unable to process interval-result: {}", &peer_addr, e);
                                             break;
                                         }
-                                    },
+                                    }
                                     Err(e) => {
                                         log::error!("[{}] unable to process stream: {}", peer_addr, e);
-                                        match c_results_tx.send(Box::new(crate::protocol::results::ServerFailedResult {
-                                            stream_idx: test.get_idx(),
-                                        })) {
-                                            Ok(_) => (),
-                                            Err(e) => log::error!("[{}] unable to report interval-failed-result: {}", &peer_addr, e),
+                                        if let Err(e) = c_results_tx.send(Box::new(ServerFailedResult { stream_idx })) {
+                                            log::error!("[{}] unable to report interval-failed-result: {}", &peer_addr, e);
                                         }
                                         break;
                                     }
@@ -296,7 +291,7 @@ pub fn serve(args: &Args) -> BoxResult<()> {
         &args.udp6_port_pool,
     )));
 
-    let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?));
+    let cpu_affinity_manager = Arc::new(Mutex::new(CpuAffinityManager::new(&args.affinity)?));
 
     let client_limit: u16 = args.client_limit as u16;
     if client_limit > 0 {
@@ -324,7 +319,7 @@ pub fn serve(args: &Args) -> BoxResult<()> {
 
         log::info!("connection from {}", address);
 
-        stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
+        stream.set_nodelay(true)?;
 
         #[cfg(unix)]
         {

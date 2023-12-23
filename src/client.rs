@@ -63,7 +63,7 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
     };
 
     log::debug!("connected TCP control-channel to {}", destination);
-    stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
+    stream.set_nodelay(true)?;
 
     #[cfg(unix)]
     {
@@ -315,40 +315,30 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 }
                 loop {
                     let mut test = c_ps.lock().unwrap();
-                    log::debug!("beginning test-interval for stream {}", test.get_idx());
+                    let stream_idx = test.get_idx();
+                    log::debug!("beginning test-interval for stream {}", stream_idx);
 
                     let interval_result = match test.run_interval() {
                         Some(interval_result) => interval_result,
                         None => {
-                            match c_results_tx.send(Box::new(ClientDoneResult {
-                                stream_idx: test.get_idx(),
-                            })) {
-                                Ok(_) => (),
-                                Err(e) => {
-                                    log::error!("unable to report interval-done-result: {}", e)
-                                }
+                            if let Err(e) = c_results_tx.send(Box::new(ClientDoneResult { stream_idx })) {
+                                log::error!("unable to report interval-done-result: {}", e);
                             }
                             break;
                         }
                     };
 
                     match interval_result {
-                        Ok(ir) => match c_results_tx.send(ir) {
-                            Ok(_) => (),
-                            Err(e) => {
+                        Ok(ir) => {
+                            if let Err(e) = c_results_tx.send(ir) {
                                 log::error!("unable to report interval-result: {}", e);
                                 break;
                             }
-                        },
+                        }
                         Err(e) => {
                             log::error!("unable to process stream: {}", e);
-                            match c_results_tx.send(Box::new(ClientFailedResult {
-                                stream_idx: test.get_idx(),
-                            })) {
-                                Ok(_) => (),
-                                Err(e) => {
-                                    log::error!("unable to report interval-failed-result: {}", e)
-                                }
+                            if let Err(e) = c_results_tx.send(Box::new(ClientFailedResult { stream_idx })) {
+                                log::error!("unable to report interval-failed-result: {}", e);
                             }
                             break;
                         }

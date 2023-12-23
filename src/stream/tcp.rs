@@ -117,18 +117,18 @@ pub mod receiver {
         }
 
         pub fn bind(&mut self, peer_ip: &IpAddr) -> BoxResult<TcpListener> {
+            let ipv6addr_unspec = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+            let ipv4addr_unspec = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
-                        return Ok(TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                            .expect("failed to bind OS-assigned IPv6 TCP socket"));
+                        return Ok(TcpListener::bind(SocketAddr::new(ipv6addr_unspec, 0))?);
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
 
                         for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result =
-                                TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(ipv6addr_unspec, self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
@@ -138,8 +138,7 @@ pub mod receiver {
                         }
                         for port_idx in 0..=self.pos_ip6 {
                             //circle back to where the search started
-                            let listener_result =
-                                TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(ipv6addr_unspec, self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
@@ -152,15 +151,13 @@ pub mod receiver {
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
-                        return Ok(TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
-                            .expect("failed to bind OS-assigned IPv4 TCP socket"));
+                        return Ok(TcpListener::bind(SocketAddr::new(ipv4addr_unspec, 0))?);
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
 
                         for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result =
-                                TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(ipv4addr_unspec, self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
@@ -170,8 +167,7 @@ pub mod receiver {
                         }
                         for port_idx in 0..=self.pos_ip4 {
                             //circle back to where the search started
-                            let listener_result =
-                                TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(ipv4addr_unspec, self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
@@ -207,7 +203,7 @@ pub mod receiver {
             peer_ip: &IpAddr,
         ) -> BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
-            let mut listener: TcpListener = port_pool.bind(peer_ip).expect("failed to bind TCP socket");
+            let mut listener: TcpListener = port_pool.bind(peer_ip)?;
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
 
             let _port = listener.local_addr()?.port();
