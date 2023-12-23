@@ -70,7 +70,7 @@ impl UdpTestDefinition {
 }
 
 pub mod receiver {
-    use crate::protocol::messaging::{Message, OperationResult};
+    use crate::protocol::messaging::{Message, TransmitState};
     use crate::protocol::results::IntervalResultBox;
     use crate::BoxResult;
     use chrono::NaiveDateTime;
@@ -426,7 +426,7 @@ pub mod receiver {
                     self.stream_idx
                 );
 
-                let receive_result = OperationResult {
+                let receive_result = TransmitState {
                     family: Some("udp".to_string()),
                     timestamp: super::get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
@@ -438,7 +438,7 @@ pub mod receiver {
                     packets_duplicated: Some(history.packets_duplicated),
                     unbroken_sequence: Some(history.longest_unbroken_sequence),
                     jitter_seconds: history.longest_jitter_seconds,
-                    ..OperationResult::default()
+                    ..TransmitState::default()
                 };
                 let receive_result = Message::Receive(receive_result);
                 Some(Ok(Box::new(super::UdpReceiveResult { receive_result })))
@@ -464,7 +464,7 @@ pub mod receiver {
 }
 
 pub mod sender {
-    use crate::protocol::messaging::{Message, OperationResult};
+    use crate::protocol::messaging::{Message, TransmitState};
     use crate::protocol::results::IntervalResultBox;
     use crate::BoxResult;
     use std::net::UdpSocket;
@@ -595,7 +595,7 @@ pub mod sender {
                                 bytes_sent,
                                 self.stream_idx
                             );
-                            let send_result = OperationResult {
+                            let send_result = TransmitState {
                                 family: Some("udp".to_string()),
                                 timestamp: super::get_unix_timestamp(),
                                 stream_idx: Some(self.stream_idx),
@@ -603,7 +603,7 @@ pub mod sender {
                                 bytes_sent: Some(bytes_sent),
                                 packets_sent: Some(packets_sent),
                                 sends_blocked: Some(sends_blocked),
-                                ..OperationResult::default()
+                                ..TransmitState::default()
                             };
                             let send_result = Message::Send(send_result);
                             return Some(Ok(Box::new(super::UdpSendResult { send_result })));
@@ -644,7 +644,7 @@ pub mod sender {
                     bytes_sent,
                     self.stream_idx
                 );
-                let send_result = OperationResult {
+                let send_result = TransmitState {
                     family: Some("udp".to_string()),
                     timestamp: super::get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
@@ -652,7 +652,7 @@ pub mod sender {
                     bytes_sent: Some(bytes_sent),
                     packets_sent: Some(packets_sent),
                     sends_blocked: Some(sends_blocked),
-                    ..OperationResult::default()
+                    ..TransmitState::default()
                 };
                 let send_result = Message::Send(send_result);
                 Some(Ok(Box::new(super::UdpSendResult { send_result })))

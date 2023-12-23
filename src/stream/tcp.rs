@@ -75,7 +75,7 @@ pub mod receiver {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use crate::protocol::messaging::{Message, OperationResult};
+    use crate::protocol::messaging::{Message, TransmitState};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const POLL_TIMEOUT: Duration = Duration::from_millis(250);
@@ -424,13 +424,13 @@ pub mod receiver {
                     self.stream_idx,
                     peer_addr
                 );
-                let receive_result = OperationResult {
+                let receive_result = TransmitState {
                     timestamp: super::get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
                     bytes_received: Some(bytes_received),
                     family: Some("tcp".to_string()),
-                    ..OperationResult::default()
+                    ..TransmitState::default()
                 };
                 let receive_result = Message::Receive(receive_result);
                 Some(Ok(Box::new(super::TcpReceiveResult { receive_result })))
@@ -470,7 +470,7 @@ pub mod sender {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
-    use crate::protocol::messaging::{Message, OperationResult};
+    use crate::protocol::messaging::{Message, TransmitState};
     use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -643,14 +643,14 @@ pub mod sender {
                         peer_addr
                     );
 
-                    let send_result = OperationResult {
+                    let send_result = TransmitState {
                         timestamp: super::get_unix_timestamp(),
                         stream_idx: Some(self.stream_idx),
                         duration: elapsed_time.as_secs_f32(),
                         bytes_sent: Some(bytes_sent),
                         sends_blocked: Some(sends_blocked),
                         family: Some("tcp".to_string()),
-                        ..OperationResult::default()
+                        ..TransmitState::default()
                     };
                     let send_result = Message::Send(send_result);
 
@@ -683,14 +683,14 @@ pub mod sender {
                     peer_addr
                 );
 
-                let send_result = OperationResult {
+                let send_result = TransmitState {
                     timestamp: super::get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
                     bytes_sent: Some(bytes_sent),
                     sends_blocked: Some(sends_blocked),
                     family: Some("tcp".to_string()),
-                    ..OperationResult::default()
+                    ..TransmitState::default()
                 };
                 let send_result = Message::Send(send_result);
 

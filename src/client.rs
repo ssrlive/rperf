@@ -176,7 +176,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                     }
                 }
                 _ => {
-                    tr.update_from_json(result.to_json())?;
+                    let msg = serde_json::from_value::<Message>(result.to_json())?;
+                    tr.update_from_message(&msg)?;
                 }
             }
         }
@@ -378,8 +379,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                         println!("{}", result.to_string(display_bit));
                     }
                     let mut tr = test_results.lock().unwrap();
-                    let payload = serde_json::to_value(msg)?;
-                    tr.update_from_json(payload)?;
+                    tr.update_from_message(&msg)?;
                 }
                 Message::Done(ref res) | Message::Failed(ref res) => {
                     //completion-result from the server

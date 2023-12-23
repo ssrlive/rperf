@@ -82,7 +82,7 @@ fn handle_client(
                     //since we're receiving data, we're also responsible for letting the client know where to send it
                     let mut stream_ports = Vec::with_capacity(stream_count as usize);
 
-                    if cfg.family.as_ref().unwrap() == "udp" {
+                    if cfg.family.as_deref() == Some("udp") {
                         log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_count);
 
                         let mut c_udp_port_pool = udp_port_pool.lock().unwrap();
@@ -129,7 +129,7 @@ fn handle_client(
                     let dummy = Vec::new();
                     let stream_ports = cfg.stream_ports.as_ref().unwrap_or(&dummy);
 
-                    if cfg.family.as_ref().unwrap() == "udp" {
+                    if cfg.family.as_deref() == Some("udp") {
                         log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_ports.len());
 
                         let test_definition = udp::UdpTestDefinition::new(cfg)?;

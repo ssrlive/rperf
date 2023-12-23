@@ -18,7 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::messaging::{FinalResult, Message};
+use crate::protocol::messaging::{FinalState, Message};
 use crate::BoxResult;
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -73,7 +73,7 @@ impl IntervalResult for ClientDoneResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Done(FinalResult {
+        let msg = Message::Done(FinalState {
             origin: Some("client".to_string()),
             stream_idx: Some(self.stream_idx as usize),
         });
@@ -101,7 +101,7 @@ impl IntervalResult for ServerDoneResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Done(FinalResult {
+        let msg = Message::Done(FinalState {
             origin: Some("server".to_string()),
             stream_idx: Some(self.stream_idx as usize),
         });
@@ -130,7 +130,7 @@ impl IntervalResult for ClientFailedResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Failed(FinalResult {
+        let msg = Message::Failed(FinalState {
             origin: Some("client".to_string()),
             stream_idx: Some(self.stream_idx as usize),
         });
@@ -158,7 +158,7 @@ impl IntervalResult for ServerFailedResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Failed(FinalResult {
+        let msg = Message::Failed(FinalState {
             origin: Some("server".to_string()),
             stream_idx: Some(self.stream_idx as usize),
         });
@@ -583,7 +583,7 @@ pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBo
 }
 
 pub trait StreamResults {
-    fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()>;
+    fn update_from_message(&mut self, msg: &Message) -> BoxResult<()>;
 
     fn to_json(&self, omit_seconds: usize) -> serde_json::Value;
 }
@@ -593,8 +593,8 @@ struct TcpStreamResults {
     send_results: Vec<TcpSendResult>,
 }
 impl StreamResults for TcpStreamResults {
-    fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
-        let msg = serde_json::from_value::<Message>(value)?;
+    fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
+        let msg = msg.clone();
         match msg {
             Message::Receive(_) => self.receive_results.push(TcpReceiveResult { receive_result: msg }),
             Message::Send(_) => self.send_results.push(TcpSendResult { send_result: msg }),
@@ -662,8 +662,8 @@ struct UdpStreamResults {
 }
 
 impl StreamResults for UdpStreamResults {
-    fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
-        let msg = serde_json::from_value::<Message>(value)?;
+    fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
+        let msg = msg.clone();
         match msg {
             Message::Receive(_) => self.receive_results.push(UdpReceiveResult { receive_result: msg }),
             Message::Send(_) => self.send_results.push(UdpSendResult { send_result: msg }),
@@ -774,7 +774,7 @@ pub trait TestResults {
 
     fn is_success(&self) -> bool;
 
-    fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()>;
+    fn update_from_message(&mut self, msg: &Message) -> BoxResult<()>;
 
     fn to_json(
         &self,
@@ -855,31 +855,30 @@ impl TestResults for TcpTestResults {
         self.pending_tests.is_empty() && self.failed_tests.is_empty()
     }
 
-    fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
-        match value.get("family") {
-            Some(f) => match f.as_str() {
-                Some(family) => match family {
-                    "tcp" => match value.get("stream_idx") {
-                        Some(idx) => match idx.as_i64() {
-                            Some(idx64) => match self.stream_results.get_mut(&(idx64 as u8)) {
-                                Some(stream_results) => stream_results.update_from_json(value),
-                                None => Err(Box::new(simple_error::simple_error!(
-                                    "stream-index {} is not a valid identifier",
-                                    idx64
-                                ))),
-                            },
-                            None => Err(Box::new(simple_error::simple_error!("stream-index is not an integer"))),
-                        },
-                        None => Err(Box::new(simple_error::simple_error!("no stream-index specified"))),
-                    },
-                    _ => Err(Box::new(simple_error::simple_error!(
-                        "unsupported family for TCP stream-result: {}",
-                        family
-                    ))),
-                },
-                None => Err(Box::new(simple_error::simple_error!("kind must be a string for TCP stream-result"))),
-            },
-            None => Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result"))),
+    fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
+        match msg {
+            Message::Receive(res) | Message::Send(res) => {
+                if res.family.as_deref() == Some("tcp") {
+                    let idx = res.stream_idx.unwrap();
+                    match self.stream_results.get_mut(&idx) {
+                        Some(stream_results) => {
+                            stream_results.update_from_message(msg)?;
+                            Ok(())
+                        }
+                        None => {
+                            let err = format!("stream-index {} is not a valid identifier", idx);
+                            Err(Box::new(simple_error::simple_error!(err)))
+                        }
+                    }
+                } else {
+                    let err = format!("unsupported family for TCP stream-result: {:?}", res.family);
+                    Err(Box::new(simple_error::simple_error!(err)))
+                }
+            }
+            _ => {
+                let err = "unsupported message type for TCP stream-result";
+                Err(Box::new(simple_error::simple_error!(err)))
+            }
         }
     }
 
@@ -1133,31 +1132,30 @@ impl TestResults for UdpTestResults {
         self.pending_tests.is_empty() && self.failed_tests.is_empty()
     }
 
-    fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
-        match value.get("family") {
-            Some(f) => match f.as_str() {
-                Some(family) => match family {
-                    "udp" => match value.get("stream_idx") {
-                        Some(idx) => match idx.as_i64() {
-                            Some(idx64) => match self.stream_results.get_mut(&(idx64 as u8)) {
-                                Some(stream_results) => stream_results.update_from_json(value),
-                                None => Err(Box::new(simple_error::simple_error!(
-                                    "stream-index {} is not a valid identifier",
-                                    idx64
-                                ))),
-                            },
-                            None => Err(Box::new(simple_error::simple_error!("stream-index is not an integer"))),
-                        },
-                        None => Err(Box::new(simple_error::simple_error!("no stream-index specified"))),
-                    },
-                    _ => Err(Box::new(simple_error::simple_error!(
-                        "unsupported family for UDP stream-result: {}",
-                        family
-                    ))),
-                },
-                None => Err(Box::new(simple_error::simple_error!("kind must be a string for UDP stream-result"))),
-            },
-            None => Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result"))),
+    fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
+        match msg {
+            Message::Receive(res) | Message::Send(res) => {
+                if res.family.as_deref() == Some("udp") {
+                    let idx = res.stream_idx.unwrap();
+                    match self.stream_results.get_mut(&idx) {
+                        Some(stream_results) => {
+                            stream_results.update_from_message(msg)?;
+                            Ok(())
+                        }
+                        None => {
+                            let err = format!("stream-index {} is not a valid identifier", idx);
+                            Err(Box::new(simple_error::simple_error!(err)))
+                        }
+                    }
+                } else {
+                    let err = format!("unsupported family for UDP stream-result: {:?}", res.family);
+                    Err(Box::new(simple_error::simple_error!(err)))
+                }
+            }
+            _ => {
+                let err = "unsupported message type for UDP stream-result";
+                Err(Box::new(simple_error::simple_error!(err)))
+            }
         }
     }
 

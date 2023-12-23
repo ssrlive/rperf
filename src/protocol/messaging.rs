@@ -38,7 +38,7 @@ pub struct Configuration {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
-pub struct OperationResult {
+pub struct TransmitState {
     pub family: Option<String>,
     pub timestamp: f64,
     pub stream_idx: Option<u8>,
@@ -56,7 +56,7 @@ pub struct OperationResult {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
-pub struct FinalResult {
+pub struct FinalState {
     pub origin: Option<String>,
     pub stream_idx: Option<usize>,
 }
@@ -73,13 +73,13 @@ pub enum Message {
     #[serde(rename(deserialize = "begin", serialize = "begin"))]
     Begin,
     #[serde(rename(deserialize = "send", serialize = "send"))]
-    Send(OperationResult),
+    Send(TransmitState),
     #[serde(rename(deserialize = "receive", serialize = "receive"))]
-    Receive(OperationResult),
+    Receive(TransmitState),
     #[serde(rename(deserialize = "done", serialize = "done"))]
-    Done(FinalResult),
+    Done(FinalState),
     #[serde(rename(deserialize = "failed", serialize = "failed"))]
-    Failed(FinalResult),
+    Failed(FinalState),
     #[serde(rename(deserialize = "end", serialize = "end"))]
     End,
 }
