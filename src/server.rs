@@ -70,8 +70,7 @@ fn handle_client(
 
     //server operations are entirely driven by client-signalling, making this a (simple) state-machine
     while is_alive() {
-        let payload = receive(stream, is_alive, &mut results_handler)?;
-        let msg: Message = serde_json::from_value(payload)?;
+        let msg = receive(stream, is_alive, &mut results_handler)?;
 
         match &msg {
             Message::Configuration(cfg) => {

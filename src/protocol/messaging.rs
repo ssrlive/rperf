@@ -56,7 +56,7 @@ pub struct OperationResult {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
-pub struct Failed {
+pub struct FinalResult {
     pub origin: Option<String>,
     pub stream_idx: Option<usize>,
 }
@@ -77,9 +77,9 @@ pub enum Message {
     #[serde(rename(deserialize = "receive", serialize = "receive"))]
     Receive(OperationResult),
     #[serde(rename(deserialize = "done", serialize = "done"))]
-    Done { origin: String, stream_idx: usize },
+    Done(FinalResult),
     #[serde(rename(deserialize = "failed", serialize = "failed"))]
-    Failed(Failed),
+    Failed(FinalResult),
     #[serde(rename(deserialize = "end", serialize = "end"))]
     End,
 }

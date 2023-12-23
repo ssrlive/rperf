@@ -22,6 +22,7 @@ use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
+use crate::protocol::messaging::Message;
 use crate::BoxResult;
 
 /// how long to wait for keepalive events
@@ -173,9 +174,11 @@ pub fn receive(
     stream: &mut TcpStream,
     alive_check: fn() -> bool,
     results_handler: &mut dyn FnMut() -> BoxResult<()>,
-) -> BoxResult<serde_json::Value> {
+) -> BoxResult<Message> {
     log::debug!("awaiting length-value from {}...", stream.peer_addr()?);
     let length = receive_length(stream, alive_check, results_handler)?;
     log::debug!("awaiting payload from {}...", stream.peer_addr()?);
-    receive_payload(stream, alive_check, results_handler, length)
+    let payload = receive_payload(stream, alive_check, results_handler, length)?;
+    let msg: Message = serde_json::from_value(payload)?;
+    Ok(msg)
 }

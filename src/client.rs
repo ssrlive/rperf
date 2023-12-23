@@ -240,84 +240,56 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
     //now that the server knows what we need to do, we have to wait for its response
     let connection_payload = receive(&mut stream, is_alive, &mut results_handler)?;
-    match connection_payload.get("kind") {
-        Some(kind) => {
-            match kind.as_str().unwrap_or_default() {
-                "connect" => {
-                    //we need to connect to the server
-                    if is_udp {
-                        //UDP
-                        log::info!("preparing for UDP test with {} streams...", stream_count);
+    match connection_payload {
+        Message::Connect { stream_ports } => {
+            // we need to connect to the server
+            if is_udp {
+                // UDP
+                log::info!("preparing for UDP test with {} streams...", stream_count);
 
-                        let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
-                        for (stream_idx, port) in connection_payload
-                            .get("stream_ports")
-                            .unwrap()
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .enumerate()
-                        {
-                            log::debug!("preparing UDP-sender for stream {}...", stream_idx);
-                            let test = udp::sender::UdpSender::new(
-                                test_definition.clone(),
-                                &(stream_idx as u8),
-                                &0,
-                                &server_addr.ip(),
-                                &(port.as_i64().unwrap() as u16),
-                                &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
-                                &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
-                                &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
-                            )?;
-                            parallel_streams.push(Arc::new(Mutex::new(test)));
-                        }
-                    } else {
-                        //TCP
-                        log::info!("preparing for TCP test with {} streams...", stream_count);
+                let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
+                for (stream_idx, port) in stream_ports.iter().enumerate() {
+                    log::debug!("preparing UDP-sender for stream {}...", stream_idx);
+                    let test = udp::sender::UdpSender::new(
+                        test_definition.clone(),
+                        &(stream_idx as u8),
+                        &0,
+                        &server_addr.ip(),
+                        port,
+                        &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
+                        &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
+                        &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
+                    )?;
+                    parallel_streams.push(Arc::new(Mutex::new(test)));
+                }
+            } else {
+                // TCP
+                log::info!("preparing for TCP test with {} streams...", stream_count);
 
-                        let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
-                        for (stream_idx, port) in connection_payload
-                            .get("stream_ports")
-                            .unwrap()
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .enumerate()
-                        {
-                            log::debug!("preparing TCP-sender for stream {}...", stream_idx);
-                            let test = tcp::sender::TcpSender::new(
-                                test_definition.clone(),
-                                &(stream_idx as u8),
-                                &server_addr.ip(),
-                                &(port.as_i64().unwrap() as u16),
-                                &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
-                                &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
-                                &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
-                                upload_config.no_delay.as_ref().unwrap_or(&false),
-                            )?;
-                            parallel_streams.push(Arc::new(Mutex::new(test)));
-                        }
-                    }
-                }
-                "connect-ready" => { //server is ready to connect to us
-                     //nothing more to do in this flow
-                }
-                _ => {
-                    log::error!(
-                        "invalid data from {}: {}",
-                        stream.peer_addr()?,
-                        serde_json::to_string(&connection_payload)?
-                    );
-                    kill();
+                let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
+                for (stream_idx, port) in stream_ports.iter().enumerate() {
+                    log::debug!("preparing TCP-sender for stream {}...", stream_idx);
+                    let test = tcp::sender::TcpSender::new(
+                        test_definition.clone(),
+                        &(stream_idx as u8),
+                        &server_addr.ip(),
+                        port,
+                        &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
+                        &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
+                        &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
+                        upload_config.no_delay.as_ref().unwrap_or(&false),
+                    )?;
+                    parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
             }
         }
-        None => {
-            log::error!(
-                "invalid data from {}: {}",
-                stream.peer_addr()?,
-                serde_json::to_string(&connection_payload)?
-            );
+        Message::ConnectReady => {
+            //server is ready to connect to us, nothing more to do in this flow
+            log::trace!("server is ready to connect to us");
+        }
+        _ => {
+            let json = serde_json::to_string(&connection_payload)?;
+            log::error!("invalid data from {}: {}", stream.peer_addr()?, json);
             kill();
         }
     }
@@ -387,7 +359,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
         //watch for events from the server
         while is_alive() {
-            let payload = match receive(&mut stream, is_alive, &mut results_handler) {
+            let msg = match receive(&mut stream, is_alive, &mut results_handler) {
                 Ok(payload) => payload,
                 Err(e) => {
                     if !complete {
@@ -398,38 +370,27 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 }
             };
 
-            let kind = match payload.get("kind") {
-                Some(kind) => kind,
-                None => {
-                    log::error!(
-                        "invalid data from {}: {}",
-                        stream.peer_addr()?,
-                        serde_json::to_string(&connection_payload)?
-                    );
-                    break;
-                }
-            };
-
-            match kind.as_str().unwrap_or_default() {
-                "receive" | "send" => {
-                    //receive/send-results from the server
+            match msg {
+                Message::Receive(_) | Message::Send(_) => {
+                    let payload = serde_json::to_value(msg)?;
+                    // receive/send-results from the server
                     if !display_json {
-                        let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
+                        let result = crate::protocol::results::interval_result_from_json(&payload)?;
                         println!("{}", result.to_string(display_bit));
                     }
                     let mut tr = test_results.lock().unwrap();
                     tr.update_from_json(payload)?;
                 }
-                "done" | "failed" => match payload.get("stream_idx") {
+                Message::Done(ref res) | Message::Failed(ref res) => {
                     //completion-result from the server
-                    Some(stream_idx) => match stream_idx.as_i64() {
+                    match res.stream_idx {
                         Some(idx64) => {
                             let mut tr = test_results.lock().unwrap();
-                            match kind.as_str().unwrap() {
-                                "done" => {
+                            match msg {
+                                Message::Done(_) => {
                                     log::info!("server reported completion of stream {}", idx64);
                                 }
-                                "failed" => {
+                                Message::Failed(_) => {
                                     log::warn!("server reported failure with stream {}", idx64);
                                     tr.mark_stream_done(&(idx64 as u8), false);
                                 }
@@ -444,17 +405,12 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                         None => {
                             log::error!("completion from server did not include a valid stream_idx")
                         }
-                    },
-                    None => {
-                        log::error!("completion from server did not include stream_idx")
                     }
-                },
+                }
                 _ => {
-                    log::error!(
-                        "invalid data from {}: {}",
-                        stream.peer_addr()?,
-                        serde_json::to_string(&connection_payload)?
-                    );
+                    let value = serde_json::to_value(msg)?;
+                    let json = serde_json::to_string(&value)?;
+                    log::error!("invalid data from {}: {}", stream.peer_addr()?, json);
                     break;
                 }
             }

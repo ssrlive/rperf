@@ -18,7 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::messaging::{Failed, Message};
+use crate::protocol::messaging::{FinalResult, Message};
 use crate::BoxResult;
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -73,10 +73,10 @@ impl IntervalResult for ClientDoneResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Done {
-            origin: "client".to_string(),
-            stream_idx: self.stream_idx as usize,
-        };
+        let msg = Message::Done(FinalResult {
+            origin: Some("client".to_string()),
+            stream_idx: Some(self.stream_idx as usize),
+        });
         serde_json::to_value(msg).unwrap()
     }
 
@@ -101,10 +101,10 @@ impl IntervalResult for ServerDoneResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Done {
-            origin: "server".to_string(),
-            stream_idx: self.stream_idx as usize,
-        };
+        let msg = Message::Done(FinalResult {
+            origin: Some("server".to_string()),
+            stream_idx: Some(self.stream_idx as usize),
+        });
         serde_json::to_value(msg).unwrap()
     }
 
@@ -130,11 +130,10 @@ impl IntervalResult for ClientFailedResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let info = Failed {
+        let msg = Message::Failed(FinalResult {
             origin: Some("client".to_string()),
             stream_idx: Some(self.stream_idx as usize),
-        };
-        let msg = Message::Failed(info);
+        });
         serde_json::to_value(msg).unwrap()
     }
 
@@ -159,11 +158,10 @@ impl IntervalResult for ServerFailedResult {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let info = Failed {
+        let msg = Message::Failed(FinalResult {
             origin: Some("server".to_string()),
             stream_idx: Some(self.stream_idx as usize),
-        };
-        let msg = Message::Failed(info);
+        });
         serde_json::to_value(msg).unwrap()
     }
 
@@ -560,7 +558,8 @@ impl IntervalResult for UdpSendResult {
     }
 }
 
-pub fn interval_result_from_json(value: serde_json::Value) -> BoxResult<IntervalResultBox> {
+pub fn interval_result_from_json(value: &serde_json::Value) -> BoxResult<IntervalResultBox> {
+    let value = value.clone();
     match value.get("family") {
         Some(f) => match f.as_str() {
             Some(family) => match family {
