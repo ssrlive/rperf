@@ -176,7 +176,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                     }
                 }
                 _ => {
-                    let msg = serde_json::from_value::<Message>(result.to_json())?;
+                    let msg = result.to_message();
                     tr.update_from_message(&msg)?;
                 }
             }

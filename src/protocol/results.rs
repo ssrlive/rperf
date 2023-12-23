@@ -52,7 +52,7 @@ pub trait IntervalResult {
 
     fn get_stream_idx(&self) -> u8;
 
-    fn to_json(&self) -> serde_json::Value;
+    fn to_message(&self) -> Message;
 
     //produces test-results in tabular form
     fn to_string(&self, bit: bool) -> String;
@@ -72,12 +72,11 @@ impl IntervalResult for ClientDoneResult {
         self.stream_idx
     }
 
-    fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Done(FinalState {
+    fn to_message(&self) -> Message {
+        Message::Done(FinalState {
             origin: Some("client".to_string()),
             stream_idx: Some(self.stream_idx as usize),
-        });
-        serde_json::to_value(msg).unwrap()
+        })
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -100,12 +99,11 @@ impl IntervalResult for ServerDoneResult {
         self.stream_idx
     }
 
-    fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Done(FinalState {
+    fn to_message(&self) -> Message {
+        Message::Done(FinalState {
             origin: Some("server".to_string()),
             stream_idx: Some(self.stream_idx as usize),
-        });
-        serde_json::to_value(msg).unwrap()
+        })
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -129,12 +127,11 @@ impl IntervalResult for ClientFailedResult {
         self.stream_idx
     }
 
-    fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Failed(FinalState {
+    fn to_message(&self) -> Message {
+        Message::Failed(FinalState {
             origin: Some("client".to_string()),
             stream_idx: Some(self.stream_idx as usize),
-        });
-        serde_json::to_value(msg).unwrap()
+        })
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -157,12 +154,11 @@ impl IntervalResult for ServerFailedResult {
         self.stream_idx
     }
 
-    fn to_json(&self) -> serde_json::Value {
-        let msg = Message::Failed(FinalState {
+    fn to_message(&self) -> Message {
+        Message::Failed(FinalState {
             origin: Some("server".to_string()),
             stream_idx: Some(self.stream_idx as usize),
-        });
-        serde_json::to_value(msg).unwrap()
+        })
     }
 
     fn to_string(&self, _bit: bool) -> String {
@@ -218,14 +214,14 @@ impl IntervalResult for TcpReceiveResult {
         }
     }
 
-    fn to_json(&self) -> serde_json::Value {
+    fn to_message(&self) -> Message {
         let mut msg = self.receive_result.clone();
         if let Message::Receive(ref mut receive_result) = msg {
             receive_result.family = Some("tcp".to_string());
         } else {
             unreachable!();
         }
-        serde_json::to_value(msg).unwrap()
+        msg
     }
 
     fn to_string(&self, bit: bool) -> String {
@@ -310,14 +306,14 @@ impl IntervalResult for TcpSendResult {
         }
     }
 
-    fn to_json(&self) -> serde_json::Value {
+    fn to_message(&self) -> Message {
         let mut msg = self.send_result.clone();
         if let Message::Send(ref mut send_result) = msg {
             send_result.family = Some("tcp".to_string());
         } else {
             unreachable!();
         }
-        serde_json::to_value(msg).unwrap()
+        msg
     }
 
     fn to_string(&self, bit: bool) -> String {
@@ -400,14 +396,14 @@ impl IntervalResult for UdpReceiveResult {
         }
     }
 
-    fn to_json(&self) -> serde_json::Value {
+    fn to_message(&self) -> Message {
         let mut msg = self.receive_result.clone();
         if let Message::Receive(ref mut receive_result) = msg {
             receive_result.family = Some("udp".to_string());
         } else {
             unreachable!();
         }
-        serde_json::to_value(msg).unwrap()
+        msg
     }
 
     fn to_string(&self, bit: bool) -> String {
@@ -507,14 +503,14 @@ impl IntervalResult for UdpSendResult {
         }
     }
 
-    fn to_json(&self) -> serde_json::Value {
+    fn to_message(&self) -> Message {
         let mut msg = self.send_result.clone();
         if let Message::Send(ref mut send_result) = msg {
             send_result.family = Some("udp".to_string());
         } else {
             unreachable!();
         }
-        serde_json::to_value(msg).unwrap()
+        msg
     }
 
     fn to_string(&self, bit: bool) -> String {

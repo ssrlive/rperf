@@ -63,7 +63,8 @@ fn handle_client(
         // drain all results every time this closer is invoked
         while let Ok(result) = results_rx.try_recv() {
             // if there's something to forward, write it to the client
-            send(&mut forwarding_send_stream, &result.to_json())?;
+            let value = serde_json::to_value(&result.to_message())?;
+            send(&mut forwarding_send_stream, &value)?;
         }
         Ok(())
     };
