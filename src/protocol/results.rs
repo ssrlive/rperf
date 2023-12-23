@@ -179,8 +179,8 @@ pub struct TcpReceiveResult {
 }
 
 impl TcpReceiveResult {
-    fn from_json(value: serde_json::Value) -> BoxResult<TcpReceiveResult> {
-        let mut receive_result: Message = serde_json::from_value(value)?;
+    fn from_message(msg: &Message) -> BoxResult<TcpReceiveResult> {
+        let mut receive_result = msg.clone();
         if let Message::Receive(ref mut receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("tcp") {
                 return Err(Box::new(simple_error::simple_error!(
@@ -266,8 +266,8 @@ pub struct TcpSendResult {
 }
 
 impl TcpSendResult {
-    fn from_json(value: serde_json::Value) -> BoxResult<TcpSendResult> {
-        let mut send_result: Message = serde_json::from_value(value)?;
+    fn from_message(msg: &Message) -> BoxResult<TcpSendResult> {
+        let mut send_result = msg.clone();
         if let Message::Send(ref mut send_result) = send_result {
             if send_result.sends_blocked.is_none() {
                 // pre-0.1.8 peer
@@ -362,8 +362,8 @@ pub struct UdpReceiveResult {
 }
 
 impl UdpReceiveResult {
-    fn from_json(value: serde_json::Value) -> BoxResult<UdpReceiveResult> {
-        let receive_result: Message = serde_json::from_value(value)?;
+    fn from_message(msg: &Message) -> BoxResult<UdpReceiveResult> {
+        let receive_result = msg.clone();
         if let Message::Receive(ref receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("udp") {
                 return Err(Box::new(simple_error::simple_error!(
@@ -463,8 +463,8 @@ pub struct UdpSendResult {
 }
 
 impl UdpSendResult {
-    fn from_json(value: serde_json::Value) -> BoxResult<UdpSendResult> {
-        let mut send_result = serde_json::from_value::<Message>(value)?;
+    fn from_message(msg: &Message) -> BoxResult<UdpSendResult> {
+        let mut send_result = msg.clone();
         if let Message::Send(ref mut send_result) = send_result {
             if send_result.sends_blocked.is_none() {
                 //pre-0.1.8 peer
@@ -559,22 +559,21 @@ impl IntervalResult for UdpSendResult {
 }
 
 pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBox> {
-    let value = serde_json::to_value(msg.clone())?;
     match msg {
         Message::Receive(res) => {
             if res.family.as_deref() == Some("tcp") {
-                Ok(Box::new(TcpReceiveResult::from_json(value)?))
+                Ok(Box::new(TcpReceiveResult::from_message(msg)?))
             } else if res.family.as_deref() == Some("udp") {
-                Ok(Box::new(UdpReceiveResult::from_json(value)?))
+                Ok(Box::new(UdpReceiveResult::from_message(msg)?))
             } else {
                 Err(Box::new(simple_error::simple_error!("unsupported interval-result family")))
             }
         }
         Message::Send(res) => {
             if res.family.as_deref() == Some("tcp") {
-                Ok(Box::new(TcpSendResult::from_json(value)?))
+                Ok(Box::new(TcpSendResult::from_message(msg)?))
             } else if res.family.as_deref() == Some("udp") {
-                Ok(Box::new(UdpSendResult::from_json(value)?))
+                Ok(Box::new(UdpSendResult::from_message(msg)?))
             } else {
                 Err(Box::new(simple_error::simple_error!("unsupported interval-result family")))
             }
