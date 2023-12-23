@@ -372,13 +372,13 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
             match msg {
                 Message::Receive(_) | Message::Send(_) => {
-                    let payload = serde_json::to_value(msg)?;
                     // receive/send-results from the server
                     if !display_json {
-                        let result = crate::protocol::results::interval_result_from_json(&payload)?;
+                        let result = crate::protocol::results::interval_result_from_message(&msg)?;
                         println!("{}", result.to_string(display_bit));
                     }
                     let mut tr = test_results.lock().unwrap();
+                    let payload = serde_json::to_value(msg)?;
                     tr.update_from_json(payload)?;
                 }
                 Message::Done(ref res) | Message::Failed(ref res) => {

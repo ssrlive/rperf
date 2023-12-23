@@ -558,41 +558,28 @@ impl IntervalResult for UdpSendResult {
     }
 }
 
-pub fn interval_result_from_json(value: &serde_json::Value) -> BoxResult<IntervalResultBox> {
-    let value = value.clone();
-    match value.get("family") {
-        Some(f) => match f.as_str() {
-            Some(family) => match family {
-                "tcp" => match value.get("kind") {
-                    Some(k) => match k.as_str() {
-                        Some(kind) => match kind {
-                            "receive" => Ok(Box::new(TcpReceiveResult::from_json(value)?)),
-                            "send" => Ok(Box::new(TcpSendResult::from_json(value)?)),
-                            _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind: {}", kind))),
-                        },
-                        None => Err(Box::new(simple_error::simple_error!("interval-result's kind is not a string"))),
-                    },
-                    None => Err(Box::new(simple_error::simple_error!("interval-result has no kind"))),
-                },
-                "udp" => match value.get("kind") {
-                    Some(k) => match k.as_str() {
-                        Some(kind) => match kind {
-                            "receive" => Ok(Box::new(UdpReceiveResult::from_json(value)?)),
-                            "send" => Ok(Box::new(UdpSendResult::from_json(value)?)),
-                            _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind: {}", kind))),
-                        },
-                        None => Err(Box::new(simple_error::simple_error!("interval-result's kind is not a string"))),
-                    },
-                    None => Err(Box::new(simple_error::simple_error!("interval-result has no kind"))),
-                },
-                _ => Err(Box::new(simple_error::simple_error!(
-                    "unsupported interval-result family: {}",
-                    family
-                ))),
-            },
-            None => Err(Box::new(simple_error::simple_error!("interval-result's family is not a string"))),
-        },
-        None => Err(Box::new(simple_error::simple_error!("interval-result has no family"))),
+pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBox> {
+    let value = serde_json::to_value(msg.clone())?;
+    match msg {
+        Message::Receive(res) => {
+            if res.family.as_deref() == Some("tcp") {
+                Ok(Box::new(TcpReceiveResult::from_json(value)?))
+            } else if res.family.as_deref() == Some("udp") {
+                Ok(Box::new(UdpReceiveResult::from_json(value)?))
+            } else {
+                Err(Box::new(simple_error::simple_error!("unsupported interval-result family")))
+            }
+        }
+        Message::Send(res) => {
+            if res.family.as_deref() == Some("tcp") {
+                Ok(Box::new(TcpSendResult::from_json(value)?))
+            } else if res.family.as_deref() == Some("udp") {
+                Ok(Box::new(UdpSendResult::from_json(value)?))
+            } else {
+                Err(Box::new(simple_error::simple_error!("unsupported interval-result family")))
+            }
+        }
+        _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind"))),
     }
 }
 
@@ -674,28 +661,19 @@ struct UdpStreamResults {
     receive_results: Vec<UdpReceiveResult>,
     send_results: Vec<UdpSendResult>,
 }
+
 impl StreamResults for UdpStreamResults {
     fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
-        match value.get("kind") {
-            Some(k) => match k.as_str() {
-                Some(kind) => match kind {
-                    "send" => {
-                        self.send_results.push(UdpSendResult::from_json(value)?);
-                        Ok(())
-                    }
-                    "receive" => {
-                        self.receive_results.push(UdpReceiveResult::from_json(value)?);
-                        Ok(())
-                    }
-                    _ => Err(Box::new(simple_error::simple_error!(
-                        "unsupported kind for UDP stream-result: {}",
-                        kind
-                    ))),
-                },
-                None => Err(Box::new(simple_error::simple_error!("kind must be a string for UDP stream-result"))),
-            },
-            None => Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result"))),
+        let msg = serde_json::from_value::<Message>(value)?;
+        match msg {
+            Message::Receive(_) => self.receive_results.push(UdpReceiveResult { receive_result: msg }),
+            Message::Send(_) => self.send_results.push(UdpSendResult { send_result: msg }),
+            _ => {
+                let err = "unsupported message type for UDP stream-result";
+                return Err(Box::new(simple_error::simple_error!(err)));
+            }
         }
+        Ok(())
     }
 
     fn to_json(&self, omit_seconds: usize) -> serde_json::Value {
