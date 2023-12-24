@@ -116,7 +116,7 @@ pub mod receiver {
             }
         }
 
-        pub fn bind(&mut self, peer_ip: &IpAddr) -> BoxResult<TcpListener> {
+        pub fn bind(&mut self, peer_ip: IpAddr) -> BoxResult<TcpListener> {
             let ipv6addr_unspec = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
             let ipv4addr_unspec = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
             match peer_ip {
@@ -198,9 +198,9 @@ pub mod receiver {
     impl TcpReceiver {
         pub fn new(
             test_definition: super::TcpTestDefinition,
-            stream_idx: &u8,
+            stream_idx: u8,
             port_pool: &mut TcpPortPool,
-            peer_ip: &IpAddr,
+            peer_ip: IpAddr,
         ) -> BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let mut listener: TcpListener = port_pool.bind(peer_ip)?;
@@ -216,7 +216,7 @@ pub mod receiver {
             Ok(TcpReceiver {
                 active: AtomicBool::new(true),
                 test_definition,
-                stream_idx: stream_idx.to_owned(),
+                stream_idx,
 
                 listener: Some(listener),
                 stream: None,
@@ -449,7 +449,7 @@ pub mod receiver {
         }
 
         fn get_idx(&self) -> u8 {
-            self.stream_idx.to_owned()
+            self.stream_idx
         }
 
         fn stop(&mut self) {
@@ -494,13 +494,13 @@ pub mod sender {
         #[allow(clippy::too_many_arguments)]
         pub fn new(
             test_definition: super::TcpTestDefinition,
-            stream_idx: &u8,
-            receiver_ip: &IpAddr,
-            receiver_port: &u16,
-            send_duration: &f32,
-            send_interval: &f32,
-            send_buffer: &usize,
-            no_delay: &bool,
+            stream_idx: u8,
+            receiver_ip: IpAddr,
+            receiver_port: u16,
+            send_duration: f32,
+            send_interval: f32,
+            send_buffer: usize,
+            no_delay: bool,
         ) -> BoxResult<TcpSender> {
             let mut staged_buffer = vec![0_u8; test_definition.length];
             for (i, staged_buffer_i) in staged_buffer.iter_mut().enumerate().skip(super::TEST_HEADER_SIZE) {
@@ -513,9 +513,9 @@ pub mod sender {
             Ok(TcpSender {
                 active: true,
                 test_definition,
-                stream_idx: stream_idx.to_owned(),
+                stream_idx,
 
-                socket_addr: SocketAddr::new(*receiver_ip, *receiver_port),
+                socket_addr: SocketAddr::new(receiver_ip, receiver_port),
                 stream: None,
 
                 send_interval: send_interval.to_owned(),
@@ -709,7 +709,7 @@ pub mod sender {
         }
 
         fn get_idx(&self) -> u8 {
-            self.stream_idx.to_owned()
+            self.stream_idx
         }
 
         fn stop(&mut self) {

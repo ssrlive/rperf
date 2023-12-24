@@ -116,7 +116,7 @@ pub mod receiver {
             }
         }
 
-        pub fn bind(&mut self, peer_ip: &IpAddr) -> BoxResult<UdpSocket> {
+        pub fn bind(&mut self, peer_ip: IpAddr) -> BoxResult<UdpSocket> {
             let ipv6addr_unspec = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
             let ipv4addr_unspec = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
             match peer_ip {
@@ -208,27 +208,27 @@ pub mod receiver {
         #[allow(unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
-            stream_idx: &u8,
+            stream_idx: u8,
             port_pool: &mut UdpPortPool,
-            peer_ip: &IpAddr,
-            receive_buffer: &usize,
+            peer_ip: IpAddr,
+            receive_buffer: usize,
         ) -> BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip)?;
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
             // NOTE: features unsupported on Windows
             #[cfg(unix)]
-            if *receive_buffer != 0 {
+            if receive_buffer != 0 {
                 log::debug!("setting receive-buffer to {}...", receive_buffer);
                 let raw_socket = socket2::SockRef::from(&socket);
-                raw_socket.set_recv_buffer_size(*receive_buffer)?;
+                raw_socket.set_recv_buffer_size(receive_buffer)?;
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
             Ok(UdpReceiver {
                 active: true,
                 test_definition,
-                stream_idx: stream_idx.to_owned(),
+                stream_idx,
 
                 next_packet_id: 0,
 
@@ -452,7 +452,7 @@ pub mod receiver {
         }
 
         fn get_idx(&self) -> u8 {
-            self.stream_idx.to_owned()
+            self.stream_idx
         }
 
         fn stop(&mut self) {
@@ -491,27 +491,27 @@ pub mod sender {
         #[allow(clippy::too_many_arguments, unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
-            stream_idx: &u8,
-            port: &u16,
-            receiver_ip: &IpAddr,
-            receiver_port: &u16,
-            send_duration: &f32,
-            send_interval: &f32,
-            send_buffer: &usize,
+            stream_idx: u8,
+            port: u16,
+            receiver_ip: IpAddr,
+            receiver_port: u16,
+            send_duration: f32,
+            send_interval: f32,
+            send_buffer: usize,
         ) -> BoxResult<UdpSender> {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
-            let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
+            let socket_addr_receiver = SocketAddr::new(receiver_ip, receiver_port);
             let socket = match receiver_ip {
-                IpAddr::V6(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))?,
-                IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))?,
+                IpAddr::V6(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?,
+                IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))?,
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             // NOTE: features unsupported on Windows
             #[cfg(unix)]
-            if *send_buffer != 0 {
+            if send_buffer != 0 {
                 log::debug!("setting send-buffer to {}...", send_buffer);
                 let raw_socket = socket2::SockRef::from(&socket);
-                raw_socket.set_send_buffer_size(*send_buffer)?;
+                raw_socket.set_send_buffer_size(send_buffer)?;
             }
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
@@ -527,7 +527,7 @@ pub mod sender {
             Ok(UdpSender {
                 active: true,
                 test_definition,
-                stream_idx: stream_idx.to_owned(),
+                stream_idx,
 
                 socket,
 
@@ -687,7 +687,7 @@ pub mod sender {
         }
 
         fn get_idx(&self) -> u8 {
-            self.stream_idx.to_owned()
+            self.stream_idx
         }
 
         fn stop(&mut self) {

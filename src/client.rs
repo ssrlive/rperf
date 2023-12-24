@@ -49,7 +49,7 @@ const KILL_TIMEOUT: f64 = 5.0; //once testing finishes, allow a few seconds for 
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
-fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
+fn connect_to_server(address: &str, port: u16) -> BoxResult<TcpStream> {
     let destination = format!("{}:{}", address, port);
     log::info!("connecting to server at {}...", destination);
 
@@ -129,7 +129,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let download_config = prepare_download_configuration(args, test_id.as_bytes())?;
 
     //connect to the server
-    let mut stream = connect_to_server(args.client.as_ref().unwrap(), &args.port)?;
+    let mut stream = connect_to_server(args.client.as_ref().unwrap(), args.port)?;
     let server_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this test
@@ -200,10 +200,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
                     test_definition.clone(),
-                    &(stream_idx as u8),
+                    stream_idx as u8,
                     &mut udp_port_pool,
-                    &server_addr.ip(),
-                    &(*download_config.receive_buffer.as_ref().unwrap() as usize),
+                    server_addr.ip(),
+                    *download_config.receive_buffer.as_ref().unwrap() as usize,
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -216,7 +216,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             for stream_idx in 0..stream_count {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
                 let test =
-                    tcp::receiver::TcpReceiver::new(test_definition.clone(), &(stream_idx as u8), &mut tcp_port_pool, &server_addr.ip())?;
+                    tcp::receiver::TcpReceiver::new(test_definition.clone(), stream_idx as u8, &mut tcp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
@@ -249,17 +249,17 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 log::info!("preparing for UDP test with {} streams...", stream_count);
 
                 let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
-                for (stream_idx, port) in stream_ports.iter().enumerate() {
+                for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing UDP-sender for stream {}...", stream_idx);
                     let test = udp::sender::UdpSender::new(
                         test_definition.clone(),
-                        &(stream_idx as u8),
-                        &0,
-                        &server_addr.ip(),
+                        stream_idx as u8,
+                        0,
+                        server_addr.ip(),
                         port,
-                        &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
-                        &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
-                        &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
+                        *upload_config.duration.as_ref().unwrap_or(&0.0) as f32,
+                        *upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32,
+                        *upload_config.send_buffer.as_ref().unwrap_or(&0) as usize,
                     )?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
@@ -268,17 +268,17 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 log::info!("preparing for TCP test with {} streams...", stream_count);
 
                 let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
-                for (stream_idx, port) in stream_ports.iter().enumerate() {
+                for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                     let test = tcp::sender::TcpSender::new(
                         test_definition.clone(),
-                        &(stream_idx as u8),
-                        &server_addr.ip(),
+                        stream_idx as u8,
+                        server_addr.ip(),
                         port,
-                        &(*upload_config.duration.as_ref().unwrap_or(&0.0) as f32),
-                        &(*upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32),
-                        &(*upload_config.send_buffer.as_ref().unwrap_or(&0) as usize),
-                        upload_config.no_delay.as_ref().unwrap_or(&false),
+                        *upload_config.duration.as_ref().unwrap_or(&0.0) as f32,
+                        *upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32,
+                        *upload_config.send_buffer.as_ref().unwrap_or(&0) as usize,
+                        *upload_config.no_delay.as_ref().unwrap_or(&false),
                     )?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
