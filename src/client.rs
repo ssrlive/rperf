@@ -23,17 +23,18 @@ use crate::{
     protocol::{
         communication::{receive, send},
         messaging::{prepare_download_configuration, prepare_upload_configuration, Message},
-        results::{ClientDoneResult, ClientFailedResult},
+        results::{interval_result_from_message, ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
     stream::{tcp, udp, TestStream},
+    utils::cpu_affinity::CpuAffinityManager,
     BoxResult,
 };
 use std::{
     net::{IpAddr, Shutdown, TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::channel,
+        mpsc::{self, channel},
         Arc, Mutex,
     },
     thread,
@@ -103,7 +104,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut tcp_port_pool = tcp::receiver::TcpPortPool::new(&args.tcp_port_pool, &args.tcp6_port_pool);
     let mut udp_port_pool = udp::receiver::UdpPortPool::new(&args.udp_port_pool, &args.udp6_port_pool);
 
-    let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?));
+    let cpu_affinity_manager = Arc::new(Mutex::new(CpuAffinityManager::new(&args.affinity)?));
 
     let display_json: bool;
     let display_bit: bool;
@@ -136,10 +137,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let stream_count = download_config.streams as usize;
     let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
-    let (results_tx, results_rx): (
-        std::sync::mpsc::Sender<IntervalResultBox>,
-        std::sync::mpsc::Receiver<IntervalResultBox>,
-    ) = channel();
+    let (results_tx, results_rx) = channel::<IntervalResultBox>();
 
     let test_results: Mutex<Box<dyn TestResults>> = prepare_test_results(is_udp, stream_count as u8);
 
@@ -302,47 +300,15 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         send(&mut stream, &Message::Begin)?;
 
         log::debug!("spawning stream-threads");
-        //begin the test-streams
+        // begin the test-streams
         for (stream_idx, parallel_stream) in parallel_streams.iter_mut().enumerate() {
             log::info!("beginning execution of stream {}...", stream_idx);
             let c_ps = Arc::clone(parallel_stream);
             let c_results_tx = results_tx.clone();
             let c_cam = cpu_affinity_manager.clone();
             let handle = thread::spawn(move || {
-                {
-                    //set CPU affinity, if enabled
-                    c_cam.lock().unwrap().set_affinity();
-                }
-                loop {
-                    let mut test = c_ps.lock().unwrap();
-                    let stream_idx = test.get_idx();
-                    log::debug!("beginning test-interval for stream {}", stream_idx);
-
-                    let interval_result = match test.run_interval() {
-                        Some(interval_result) => interval_result,
-                        None => {
-                            if let Err(e) = c_results_tx.send(Box::new(ClientDoneResult { stream_idx })) {
-                                log::error!("unable to report interval-done-result: {}", e);
-                            }
-                            break;
-                        }
-                    };
-
-                    match interval_result {
-                        Ok(ir) => {
-                            if let Err(e) = c_results_tx.send(ir) {
-                                log::error!("unable to report interval-result: {}", e);
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("unable to process stream: {}", e);
-                            if let Err(e) = c_results_tx.send(Box::new(ClientFailedResult { stream_idx })) {
-                                log::error!("unable to report interval-failed-result: {}", e);
-                            }
-                            break;
-                        }
-                    }
+                if let Err(e) = client_test_run_interval(c_ps, c_cam, c_results_tx) {
+                    log::error!("error in parallel stream: {:?}", e);
                 }
             });
             parallel_streams_joinhandles.push(handle);
@@ -365,7 +331,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 Message::Receive(_) | Message::Send(_) => {
                     // receive/send-results from the server
                     if !display_json {
-                        let result = crate::protocol::results::interval_result_from_message(&msg)?;
+                        let result = interval_result_from_message(&msg)?;
                         println!("{}", result.to_string(display_bit));
                     }
                     let mut tr = test_results.lock().unwrap();
@@ -410,7 +376,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     //assume this is a controlled shutdown; if it isn't, this is just a very slight waste of time
     send(&mut stream, &Message::End)?;
     thread::sleep(Duration::from_millis(250)); //wait a moment for the "end" message to be queued for delivery to the server
-    stream.shutdown(Shutdown::Both).unwrap_or_default();
+    stream.shutdown(Shutdown::Both)?;
 
     log::debug!("stopping any still-in-progress streams");
     for ps in parallel_streams.iter_mut() {
@@ -494,6 +460,42 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         }
     }
 
+    Ok(())
+}
+
+fn client_test_run_interval(
+    c_ps: Arc<Mutex<dyn TestStream + Send + Sync>>,
+    c_cam: Arc<Mutex<CpuAffinityManager>>,
+    c_results_tx: mpsc::Sender<IntervalResultBox>,
+) -> BoxResult<()> {
+    {
+        // set CPU affinity, if enabled
+        c_cam.lock().unwrap().set_affinity();
+    }
+    loop {
+        let mut test = c_ps.lock().unwrap();
+        let stream_idx = test.get_idx();
+        log::debug!("beginning test-interval for stream {}", stream_idx);
+
+        let interval_result = match test.run_interval() {
+            Some(interval_result) => interval_result,
+            None => {
+                c_results_tx.send(Box::new(ClientDoneResult { stream_idx }))?;
+                break;
+            }
+        };
+
+        match interval_result {
+            Ok(ir) => {
+                c_results_tx.send(ir)?;
+            }
+            Err(e) => {
+                log::error!("unable to process stream: {}", e);
+                c_results_tx.send(Box::new(ClientFailedResult { stream_idx }))?;
+                break;
+            }
+        }
+    }
     Ok(())
 }
 
