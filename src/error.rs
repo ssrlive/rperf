@@ -1,6 +1,6 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("IO error: {0}")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 
     #[error("String error: {0}")]
@@ -41,12 +41,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[macro_export]
 macro_rules! error_gen {
     ($fmt:literal) => {
-        $crate::Error::from(format!($fmt))
+        $crate::error::Error::from(format!($fmt))
     };
     ($e:expr) => {
-        $crate::Error::from($e)
+        $crate::error::Error::from($e)
     };
     ($fmt:literal, $($arg:tt)+) => {
-        $crate::Error::from(format!($fmt, $($arg)+))
+        $crate::error::Error::from(format!($fmt, $($arg)+))
     };
 }
