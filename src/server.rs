@@ -177,39 +177,8 @@ fn handle_client(
                         let c_results_tx = results_tx.clone();
                         let c_cam = cpu_affinity_manager.clone();
                         let handle = thread::spawn(move || {
-                            {
-                                //set CPU affinity, if enabled
-                                c_cam.lock().unwrap().set_affinity();
-                            }
-                            loop {
-                                let mut test = c_ps.lock().unwrap();
-                                let stream_idx = test.get_idx();
-                                log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, stream_idx);
-                                let interval_result = match test.run_interval() {
-                                    Some(interval_result) => interval_result,
-                                    None => {
-                                        if let Err(err) = c_results_tx.send(Box::new(ServerDoneResult { stream_idx })) {
-                                            log::error!("[{}] unable to report interval-done-result: {}", &peer_addr, err);
-                                        }
-                                        break;
-                                    }
-                                };
-
-                                match interval_result {
-                                    Ok(ir) => {
-                                        if let Err(e) = c_results_tx.send(ir) {
-                                            log::error!("[{}] unable to process interval-result: {}", &peer_addr, e);
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log::error!("[{}] unable to process stream: {}", peer_addr, e);
-                                        if let Err(e) = c_results_tx.send(Box::new(ServerFailedResult { stream_idx })) {
-                                            log::error!("[{}] unable to report interval-failed-result: {}", &peer_addr, e);
-                                        }
-                                        break;
-                                    }
-                                }
+                            if let Err(e) = test_run_interval(c_cam, c_ps, peer_addr, c_results_tx) {
+                                log::error!("[{}] error in parallel stream: {}", &peer_addr, e);
                             }
                         });
                         parallel_streams_joinhandles.push(handle);
@@ -255,6 +224,41 @@ fn handle_client(
         }
     }
 
+    Ok(())
+}
+
+fn test_run_interval(
+    c_cam: Arc<Mutex<CpuAffinityManager>>,
+    c_ps: Arc<Mutex<dyn TestStream + Send + Sync>>,
+    peer_addr: SocketAddr,
+    c_results_tx: mpsc::Sender<IntervalResultBox>,
+) -> BoxResult<()> {
+    {
+        c_cam.lock().unwrap().set_affinity(); // set CPU affinity, if enabled
+    }
+    loop {
+        let mut test = c_ps.lock().unwrap();
+        let stream_idx = test.get_idx();
+        log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, stream_idx);
+        let interval_result = match test.run_interval() {
+            Some(interval_result) => interval_result,
+            None => {
+                log::trace!("[{}] stream {} has finished", &peer_addr, stream_idx);
+                c_results_tx.send(Box::new(ServerDoneResult { stream_idx }))?;
+                break;
+            }
+        };
+        match interval_result {
+            Ok(ir) => {
+                c_results_tx.send(ir)?;
+            }
+            Err(e) => {
+                log::error!("[{}] unable to process stream: {}", peer_addr, e);
+                c_results_tx.send(Box::new(ServerFailedResult { stream_idx }))?;
+                break;
+            }
+        }
+    }
     Ok(())
 }
 

@@ -206,8 +206,6 @@ pub mod receiver {
             let mut listener: TcpListener = port_pool.bind(peer_ip)?;
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
 
-            let _port = listener.local_addr()?.port();
-
             let mio_events = mio::Events::with_capacity(1);
             let mio_poll = mio::Poll::new()?;
             let mio_token = crate::get_global_token();
@@ -267,9 +265,8 @@ pub mod receiver {
 
                     // hand over flow to the new connection
                     self.mio_poll.registry().deregister(listener)?;
-                    self.mio_poll
-                        .registry()
-                        .register(&mut new_stream, mio_token, mio::Interest::READABLE)?;
+                    let interests = mio::Interest::READABLE;
+                    self.mio_poll.registry().register(&mut new_stream, mio_token, interests)?;
                     stream = Some(new_stream);
                     break;
                 }
