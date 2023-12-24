@@ -19,17 +19,15 @@
  */
 
 use std::io;
-use std::net::{Shutdown, SocketAddr};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use std::net::{TcpListener, TcpStream};
-
 use crate::args::Args;
 use crate::protocol::communication::{receive, send};
-use crate::protocol::messaging::{prepare_connect, prepare_connect_ready, Message};
+use crate::protocol::messaging::{prepare_connect, Message};
 use crate::protocol::results::{IntervalResultBox, ServerDoneResult, ServerFailedResult};
 use crate::stream::{tcp, udp, TestStream};
 use crate::utils::cpu_affinity::CpuAffinityManager;
@@ -64,8 +62,7 @@ fn handle_client(
         // drain all results every time this closer is invoked
         while let Ok(result) = results_rx.try_recv() {
             // if there's something to forward, write it to the client
-            let value = serde_json::to_value(&result.to_message())?;
-            send(&mut forwarding_send_stream, &value)?;
+            send(&mut forwarding_send_stream, &result.to_message())?;
         }
         Ok(())
     };
@@ -167,7 +164,7 @@ fn handle_client(
                     }
 
                     //let the client know we're ready to begin
-                    send(stream, &prepare_connect_ready())?;
+                    send(stream, &Message::ConnectReady)?;
                 }
             }
             Message::Begin => {

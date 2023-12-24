@@ -22,7 +22,7 @@ use crate::{
     args, error_gen,
     protocol::{
         communication::{receive, send},
-        messaging::{prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration, Message},
+        messaging::{prepare_download_configuration, prepare_upload_configuration, Message},
         results::{ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
@@ -225,14 +225,14 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         //add the port-list to the upload-config that the server will receive; this is in stream-index order
         upload_config.stream_ports = Some(stream_ports);
 
-        let upload_config = serde_json::to_value(Message::Configuration(upload_config.clone()))?;
+        let upload_config = Message::Configuration(upload_config.clone());
 
         //let the server know what we're expecting
         send(&mut stream, &upload_config)?;
     } else {
         log::debug!("running in forward-mode: server will be receiving data");
 
-        let download_config = serde_json::to_value(Message::Configuration(download_config.clone()))?;
+        let download_config = Message::Configuration(download_config.clone());
 
         //let the server know to prepare for us to connect
         send(&mut stream, &download_config)?;
@@ -299,7 +299,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         //if interrupted while waiting for the server to respond, there's no reason to continue
         log::info!("informing server that testing can begin...");
         //tell the server to start
-        send(&mut stream, &prepare_begin())?;
+        send(&mut stream, &Message::Begin)?;
 
         log::debug!("spawning stream-threads");
         //begin the test-streams
@@ -408,7 +408,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     }
 
     //assume this is a controlled shutdown; if it isn't, this is just a very slight waste of time
-    send(&mut stream, &prepare_end()).unwrap_or_default();
+    send(&mut stream, &Message::End)?;
     thread::sleep(Duration::from_millis(250)); //wait a moment for the "end" message to be queued for delivery to the server
     stream.shutdown(Shutdown::Both).unwrap_or_default();
 

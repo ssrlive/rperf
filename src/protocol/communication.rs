@@ -37,10 +37,11 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// sends JSON data over a client-server communications stream
-pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()> {
+pub fn send(stream: &mut TcpStream, message: &Message) -> BoxResult<()> {
     stream.set_write_timeout(Some(POLL_TIMEOUT))?;
 
-    let serialised_message = serde_json::to_vec(message)?;
+    let message = serde_json::to_value(message)?;
+    let serialised_message = serde_json::to_vec(&message)?;
 
     log::debug!(
         "sending message to {}, length {}, {:?}...",

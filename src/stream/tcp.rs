@@ -518,13 +518,13 @@ pub mod sender {
                 socket_addr: SocketAddr::new(receiver_ip, receiver_port),
                 stream: None,
 
-                send_interval: send_interval.to_owned(),
+                send_interval,
 
-                remaining_duration: send_duration.to_owned(),
+                remaining_duration: send_duration,
                 staged_buffer,
 
-                send_buffer: send_buffer.to_owned(),
-                no_delay: no_delay.to_owned(),
+                send_buffer,
+                no_delay,
             })
         }
 

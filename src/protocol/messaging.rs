@@ -84,27 +84,11 @@ pub enum Message {
     End,
 }
 
-/// prepares a message used to tell the server to begin operations
-pub fn prepare_begin() -> serde_json::Value {
-    serde_json::to_value(Message::Begin).unwrap()
-}
-
 /// prepares a message used to tell the client to connect its test-streams
-pub fn prepare_connect(stream_ports: &[u16]) -> serde_json::Value {
-    let msg = Message::Connect {
+pub fn prepare_connect(stream_ports: &[u16]) -> Message {
+    Message::Connect {
         stream_ports: stream_ports.to_vec(),
-    };
-    serde_json::to_value(msg).unwrap()
-}
-
-/// prepares a message used to tell the client that the server is ready to connect to its test-streams
-pub fn prepare_connect_ready() -> serde_json::Value {
-    serde_json::to_value(Message::ConnectReady).unwrap()
-}
-
-/// prepares a message used to tell the server that testing is finished
-pub fn prepare_end() -> serde_json::Value {
-    serde_json::to_value(Message::End).unwrap()
+    }
 }
 
 /// prepares a message used to describe the upload role of a TCP test

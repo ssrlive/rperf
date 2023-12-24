@@ -531,9 +531,9 @@ pub mod sender {
 
                 socket,
 
-                send_interval: send_interval.to_owned(),
+                send_interval,
 
-                remaining_duration: send_duration.to_owned(),
+                remaining_duration: send_duration,
                 next_packet_id: 0,
                 staged_packet,
             })
