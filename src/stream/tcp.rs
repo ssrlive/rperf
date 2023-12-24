@@ -574,20 +574,8 @@ pub mod sender {
             }
             Ok(stream)
         }
-    }
-    impl super::TestStream for TcpSender {
-        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
-            if self.stream.is_none() {
-                //if still in the setup phase, connect to the receiver
-                match self.process_connection() {
-                    Ok(stream) => {
-                        self.stream = Some(stream);
-                    }
-                    Err(e) => {
-                        return Some(Err(e));
-                    }
-                }
-            }
+
+        fn process_stream_send(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let stream = self.stream.as_mut().unwrap();
 
             let interval_duration = Duration::from_secs_f32(self.send_interval);
@@ -709,6 +697,24 @@ pub mod sender {
                 self.stream = None;
                 None
             }
+        }
+    }
+
+    impl super::TestStream for TcpSender {
+        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+            if self.stream.is_none() {
+                // if still in the setup phase, connect to the receiver
+                match self.process_connection() {
+                    Ok(stream) => {
+                        self.stream = Some(stream);
+                    }
+                    Err(e) => {
+                        return Some(Err(e));
+                    }
+                }
+            }
+            let res = self.process_stream_send()?;
+            Some(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
