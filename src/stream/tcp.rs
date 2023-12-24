@@ -81,6 +81,12 @@ pub mod receiver {
     const CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
     const RECEIVE_TIMEOUT: Duration = Duration::from_secs(3);
 
+    /// a global token generator
+    pub fn get_global_token() -> mio::Token {
+        mio::Token(TOKEN_SEED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
+    }
+    static TOKEN_SEED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     pub struct TcpPortPool {
         pub ports_ip4: Vec<u16>,
         pub ports_ip6: Vec<u16>,
@@ -208,7 +214,7 @@ pub mod receiver {
 
             let mio_events = mio::Events::with_capacity(1);
             let mio_poll = mio::Poll::new()?;
-            let mio_token = crate::get_global_token();
+            let mio_token = get_global_token();
             mio_poll.registry().register(&mut listener, mio_token, mio::Interest::READABLE)?;
 
             Ok(TcpReceiver {
@@ -331,6 +337,7 @@ pub mod receiver {
 
                 let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
                 self.mio_poll.registry().deregister(&mut unwrapped_stream)?;
+                self.mio_poll.registry().register(listener, mio_token, mio::Interest::READABLE)?;
                 log::warn!(
                     "could not validate TCP stream {} connection from {}",
                     self.stream_idx,
