@@ -345,28 +345,27 @@ pub mod receiver {
                 );
             }
         }
-    }
 
-    impl super::TestStream for TcpReceiver {
-        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+        fn process_stream_receive(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let mut bytes_received: u64 = 0;
 
             let mut additional_time_elapsed: f32 = 0.0;
             if self.stream.is_none() {
                 //if still in the setup phase, receive the sender
-                match self.process_connection() {
-                    Ok((stream, bytes_received_in_validation, time_spent_in_validation)) => {
-                        self.stream = Some(stream);
-                        // NOTE: the connection process consumes packets; account for those bytes
-                        bytes_received += bytes_received_in_validation;
-                        additional_time_elapsed += time_spent_in_validation;
-                    }
+                let (stream, bytes_received_in_validation, time_spent_in_validation) = match self.process_connection() {
+                    Ok((s, b, t)) => (s, b, t),
                     Err(e) => {
                         return Some(Err(e));
                     }
-                }
+                };
+                self.stream = Some(stream);
+                // NOTE: the connection process consumes packets; account for those bytes
+                bytes_received += bytes_received_in_validation;
+                additional_time_elapsed += time_spent_in_validation;
+
                 self.listener = None; //drop it, closing the socket
             }
+
             let stream = self.stream.as_mut().unwrap();
 
             let mio_token = self.mio_token;
@@ -440,6 +439,13 @@ pub mod receiver {
                 );
                 None
             }
+        }
+    }
+
+    impl super::TestStream for TcpReceiver {
+        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+            let res = self.process_stream_receive()?;
+            Some(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
