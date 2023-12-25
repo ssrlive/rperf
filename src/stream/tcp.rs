@@ -332,6 +332,7 @@ pub mod receiver {
                     }
                 }
                 if validated {
+                    self.listener = None; // drop it, closing the socket
                     return Ok((unwrapped_stream, bytes_received, start_validation.elapsed().as_secs_f32()));
                 }
 
@@ -346,25 +347,10 @@ pub mod receiver {
             }
         }
 
-        fn process_stream_receive(&mut self) -> Option<BoxResult<IntervalResultBox>> {
-            let mut bytes_received: u64 = 0;
+        fn process_stream_receive(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> Option<BoxResult<IntervalResultBox>> {
+            let mut bytes_received: u64 = _bytes_received;
 
-            let mut additional_time_elapsed: f32 = 0.0;
-            if self.stream.is_none() {
-                //if still in the setup phase, receive the sender
-                let (stream, bytes_received_in_validation, time_spent_in_validation) = match self.process_connection() {
-                    Ok((s, b, t)) => (s, b, t),
-                    Err(e) => {
-                        return Some(Err(e));
-                    }
-                };
-                self.stream = Some(stream);
-                // NOTE: the connection process consumes packets; account for those bytes
-                bytes_received += bytes_received_in_validation;
-                additional_time_elapsed += time_spent_in_validation;
-
-                self.listener = None; //drop it, closing the socket
-            }
+            let additional_time_elapsed: f32 = _additional_time_elapsed;
 
             let stream = self.stream.as_mut().unwrap();
 
@@ -444,7 +430,22 @@ pub mod receiver {
 
     impl super::TestStream for TcpReceiver {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
-            let res = self.process_stream_receive()?;
+            let mut bytes_received = 0;
+            let mut additional_time_elapsed = 0.0;
+            if self.stream.is_none() {
+                // if still in the setup phase, receive the sender
+                let (stream, bytes_received_in_validation, time_spent_in_validation) = match self.process_connection() {
+                    Ok((s, b, t)) => (s, b, t),
+                    Err(e) => {
+                        return Some(Err(e));
+                    }
+                };
+                self.stream = Some(stream);
+                // NOTE: the connection process consumes packets; account for those bytes
+                bytes_received += bytes_received_in_validation;
+                additional_time_elapsed += time_spent_in_validation;
+            }
+            let res = self.process_stream_receive(bytes_received, additional_time_elapsed)?;
             Some(res)
         }
 
