@@ -19,7 +19,7 @@
  */
 
 use crate::protocol::messaging::Configuration;
-use crate::protocol::results::{get_unix_timestamp, TcpReceiveResult, TcpSendResult};
+use crate::protocol::results::get_unix_timestamp;
 use crate::stream::{parse_port_spec, TestStream, INTERVAL};
 use crate::{error_gen, BoxResult};
 
@@ -73,9 +73,14 @@ pub mod receiver {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use crate::error_gen;
-    use crate::protocol::messaging::{Message, TransmitState};
-    use crate::{protocol::results::IntervalResultBox, BoxResult};
+    use crate::{
+        error_gen,
+        protocol::{
+            messaging::{Message, TransmitState},
+            results::{IntervalResultBox, TcpReceiveResult},
+        },
+        BoxResult,
+    };
 
     const POLL_TIMEOUT: Duration = Duration::from_millis(250);
     const CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -416,7 +421,7 @@ pub mod receiver {
                     ..TransmitState::default()
                 };
                 let receive_result = Message::Receive(receive_result);
-                Some(Ok(Box::new(super::TcpReceiveResult { receive_result })))
+                Some(Ok(Box::new(TcpReceiveResult::try_from(&receive_result).unwrap())))
             } else {
                 log::debug!(
                     "no bytes received via TCP stream {} from {} in this interval",
@@ -475,9 +480,14 @@ pub mod sender {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
-    use crate::error_gen;
-    use crate::protocol::messaging::{Message, TransmitState};
-    use crate::{protocol::results::IntervalResultBox, BoxResult};
+    use crate::{
+        error_gen,
+        protocol::{
+            messaging::{Message, TransmitState},
+            results::{IntervalResultBox, TcpSendResult},
+        },
+        BoxResult,
+    };
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
     const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
@@ -646,8 +656,7 @@ pub mod sender {
                         ..TransmitState::default()
                     };
                     let send_result = Message::Send(send_result);
-
-                    return Some(Ok(Box::new(super::TcpSendResult { send_result })));
+                    return Some(Ok(Box::new(TcpSendResult::try_from(&send_result).unwrap())));
                 }
 
                 if bytes_to_send_remaining <= 0 {
@@ -686,8 +695,7 @@ pub mod sender {
                     ..TransmitState::default()
                 };
                 let send_result = Message::Send(send_result);
-
-                Some(Ok(Box::new(super::TcpSendResult { send_result })))
+                Some(Ok(Box::new(TcpSendResult::try_from(&send_result).unwrap())))
             } else {
                 log::debug!(
                     "no bytes sent via TCP stream {} to {} in this interval; shutting down...",

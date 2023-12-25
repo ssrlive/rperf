@@ -34,7 +34,8 @@ impl From<&String> for Error {
     }
 }
 
-pub type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type BoxResult<T> = std::result::Result<T, BoxError>;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

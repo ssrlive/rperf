@@ -19,7 +19,7 @@
  */
 
 use crate::protocol::messaging::{FinalState, Message};
-use crate::{error_gen, BoxResult};
+use crate::{error_gen, BoxError, BoxResult};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -174,28 +174,41 @@ pub struct TcpReceiveResult {
     pub receive_result: Message,
 }
 
-impl TcpReceiveResult {
-    fn from_message(msg: &Message) -> BoxResult<TcpReceiveResult> {
-        let mut receive_result = msg.clone();
+impl TryFrom<&Message> for TcpReceiveResult {
+    type Error = BoxError;
+
+    fn try_from(msg: &Message) -> Result<Self, Self::Error> {
+        TcpReceiveResult::try_from(msg.clone())
+    }
+}
+
+impl TryFrom<Message> for TcpReceiveResult {
+    type Error = BoxError;
+
+    fn try_from(receive_result: Message) -> Result<Self, Self::Error> {
+        let mut receive_result = receive_result;
         if let Message::Receive(ref mut receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("tcp") {
-                let err = format!("not a TCP receive-result: {:?}", receive_result.family);
-                return Err(Box::new(error_gen!(err)));
+                return Err(Box::new(error_gen!("not a TCP receive-result: {:?}", receive_result.family)));
             }
         } else {
             return Err(Box::new(error_gen!("no kind specified for TCP stream-result")));
         }
         Ok(TcpReceiveResult { receive_result })
     }
+}
 
-    fn to_result_json(&self) -> serde_json::Value {
-        let mut msg = self.receive_result.clone();
+impl TryFrom<&TcpReceiveResult> for serde_json::Value {
+    type Error = BoxError;
+
+    fn try_from(res: &TcpReceiveResult) -> Result<Self, Self::Error> {
+        let mut msg = res.receive_result.clone();
         if let Message::Receive(ref mut receive_result) = msg {
             receive_result.stream_idx = None;
         } else {
-            unreachable!();
+            return Err(Box::new(error_gen!("not a TCP receive-result: {:?}", msg)));
         }
-        serde_json::to_value(msg).unwrap()
+        Ok(serde_json::to_value(msg)?)
     }
 }
 
@@ -259,9 +272,19 @@ pub struct TcpSendResult {
     pub send_result: Message,
 }
 
-impl TcpSendResult {
-    fn from_message(msg: &Message) -> BoxResult<TcpSendResult> {
-        let mut send_result = msg.clone();
+impl TryFrom<&Message> for TcpSendResult {
+    type Error = BoxError;
+
+    fn try_from(msg: &Message) -> Result<Self, Self::Error> {
+        TcpSendResult::try_from(msg.clone())
+    }
+}
+
+impl TryFrom<Message> for TcpSendResult {
+    type Error = BoxError;
+
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let mut send_result = msg;
         if let Message::Send(ref mut send_result) = send_result {
             if send_result.sends_blocked.is_none() {
                 // pre-0.1.8 peer
@@ -269,23 +292,26 @@ impl TcpSendResult {
             }
 
             if send_result.family.as_deref() != Some("tcp") {
-                let err = format!("not a TCP send-result: {:?}", send_result.family);
-                return Err(Box::new(error_gen!(err)));
+                return Err(Box::new(error_gen!("not a TCP send-result: {:?}", send_result.family)));
             }
         } else {
             return Err(Box::new(error_gen!("no kind specified for UDP stream-result")));
         }
         Ok(TcpSendResult { send_result })
     }
+}
 
-    fn to_result_json(&self) -> serde_json::Value {
-        let mut msg = self.send_result.clone();
+impl TryFrom<&TcpSendResult> for serde_json::Value {
+    type Error = BoxError;
+
+    fn try_from(res: &TcpSendResult) -> Result<Self, Self::Error> {
+        let mut msg = res.send_result.clone();
         if let Message::Send(ref mut send_result) = msg {
             send_result.stream_idx = None;
         } else {
-            unreachable!();
+            return Err(Box::new(error_gen!("not a TCP send-result: {:?}", msg)));
         }
-        serde_json::to_value(msg).unwrap()
+        Ok(serde_json::to_value(msg)?)
     }
 }
 
@@ -353,30 +379,44 @@ pub struct UdpReceiveResult {
     pub receive_result: Message,
 }
 
-impl UdpReceiveResult {
-    fn from_message(msg: &Message) -> BoxResult<UdpReceiveResult> {
-        let receive_result = msg.clone();
+impl TryFrom<&Message> for UdpReceiveResult {
+    type Error = BoxError;
+
+    fn try_from(msg: &Message) -> Result<Self, Self::Error> {
+        UdpReceiveResult::try_from(msg.clone())
+    }
+}
+
+impl TryFrom<Message> for UdpReceiveResult {
+    type Error = BoxError;
+
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let receive_result = msg;
         if let Message::Receive(ref receive_result) = receive_result {
             if receive_result.family.as_deref() != Some("udp") {
-                let err = format!("not a UDP send-result: {:?}", receive_result.family);
-                return Err(Box::new(error_gen!(err)));
+                return Err(Box::new(error_gen!("not a UDP receive-result: {:?}", receive_result.family)));
             }
         } else {
             return Err(Box::new(error_gen!("no kind specified for UDP stream-result")));
         }
         Ok(UdpReceiveResult { receive_result })
     }
+}
 
-    fn to_result_json(&self) -> serde_json::Value {
-        let mut msg = self.receive_result.clone();
-        if let Message::Receive(ref mut send_result) = msg {
-            send_result.stream_idx = None;
+impl TryFrom<&UdpReceiveResult> for serde_json::Value {
+    type Error = BoxError;
+
+    fn try_from(res: &UdpReceiveResult) -> Result<Self, Self::Error> {
+        let mut msg = res.receive_result.clone();
+        if let Message::Receive(ref mut receive_result) = msg {
+            receive_result.stream_idx = None;
         } else {
-            unreachable!();
+            return Err(Box::new(error_gen!("not a UDP receive-result: {:?}", msg)));
         }
-        serde_json::to_value(msg).unwrap()
+        Ok(serde_json::to_value(msg)?)
     }
 }
+
 impl IntervalResult for UdpReceiveResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::UdpReceive
@@ -452,33 +492,46 @@ pub struct UdpSendResult {
     pub send_result: Message,
 }
 
-impl UdpSendResult {
-    fn from_message(msg: &Message) -> BoxResult<UdpSendResult> {
-        let mut send_result = msg.clone();
+impl TryFrom<&Message> for UdpSendResult {
+    type Error = BoxError;
+
+    fn try_from(msg: &Message) -> Result<Self, Self::Error> {
+        UdpSendResult::try_from(msg.clone())
+    }
+}
+
+impl TryFrom<Message> for UdpSendResult {
+    type Error = BoxError;
+
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let mut send_result = msg;
         if let Message::Send(ref mut send_result) = send_result {
             if send_result.sends_blocked.is_none() {
-                //pre-0.1.8 peer
-                send_result.sends_blocked = Some(0_u64); //report pre-0.1.8 status
+                // pre-0.1.8 peer
+                send_result.sends_blocked = Some(0_u64); // report pre-0.1.8 status
             }
 
             if send_result.family.as_deref() != Some("udp") {
-                let err = format!("not a UDP send-result: {:?}", send_result.family);
-                return Err(Box::new(error_gen!(err)));
+                return Err(Box::new(error_gen!("not a UDP send-result: {:?}", send_result.family)));
             }
         } else {
             return Err(Box::new(error_gen!("no kind specified for UDP stream-result")));
         }
         Ok(UdpSendResult { send_result })
     }
+}
 
-    fn to_result_json(&self) -> serde_json::Value {
-        let mut msg = self.send_result.clone();
+impl TryFrom<&UdpSendResult> for serde_json::Value {
+    type Error = BoxError;
+
+    fn try_from(res: &UdpSendResult) -> Result<Self, Self::Error> {
+        let mut msg = res.send_result.clone();
         if let Message::Send(ref mut send_result) = msg {
             send_result.stream_idx = None;
         } else {
-            unreachable!();
+            return Err(Box::new(error_gen!("not a UDP send-result: {:?}", msg)));
         }
-        serde_json::to_value(msg).unwrap()
+        Ok(serde_json::to_value(msg)?)
     }
 }
 
@@ -550,18 +603,18 @@ pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBo
     match msg {
         Message::Receive(res) => {
             if res.family.as_deref() == Some("tcp") {
-                Ok(Box::new(TcpReceiveResult::from_message(msg)?))
+                Ok(Box::new(TcpReceiveResult::try_from(msg)?))
             } else if res.family.as_deref() == Some("udp") {
-                Ok(Box::new(UdpReceiveResult::from_message(msg)?))
+                Ok(Box::new(UdpReceiveResult::try_from(msg)?))
             } else {
                 Err(Box::new(error_gen!("unsupported interval-result family")))
             }
         }
         Message::Send(res) => {
             if res.family.as_deref() == Some("tcp") {
-                Ok(Box::new(TcpSendResult::from_message(msg)?))
+                Ok(Box::new(TcpSendResult::try_from(msg)?))
             } else if res.family.as_deref() == Some("udp") {
-                Ok(Box::new(UdpSendResult::from_message(msg)?))
+                Ok(Box::new(UdpSendResult::try_from(msg)?))
             } else {
                 Err(Box::new(error_gen!("unsupported interval-result family")))
             }
@@ -582,10 +635,9 @@ struct TcpStreamResults {
 }
 impl StreamResults for TcpStreamResults {
     fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
-        let msg = msg.clone();
         match msg {
-            Message::Receive(_) => self.receive_results.push(TcpReceiveResult { receive_result: msg }),
-            Message::Send(_) => self.send_results.push(TcpSendResult { send_result: msg }),
+            Message::Receive(_) => self.receive_results.push(TcpReceiveResult::try_from(msg)?),
+            Message::Send(_) => self.send_results.push(TcpSendResult::try_from(msg)?),
             _ => return Err(Box::new(error_gen!("unsupported message type for TCP stream-result"))),
         }
         Ok(())
@@ -633,8 +685,8 @@ impl StreamResults for TcpStreamResults {
         });
 
         serde_json::json!({
-            "receive": self.receive_results.iter().map(|rr| rr.to_result_json()).collect::<Vec<serde_json::Value>>(),
-            "send": self.send_results.iter().map(|sr| sr.to_result_json()).collect::<Vec<serde_json::Value>>(),
+            "receive": self.receive_results.iter().map(|rr| rr.try_into().unwrap()).collect::<Vec<serde_json::Value>>(),
+            "send": self.send_results.iter().map(|sr| sr.try_into().unwrap()).collect::<Vec<serde_json::Value>>(),
             "summary": summary,
         })
     }
@@ -647,10 +699,9 @@ struct UdpStreamResults {
 
 impl StreamResults for UdpStreamResults {
     fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
-        let msg = msg.clone();
         match msg {
-            Message::Receive(_) => self.receive_results.push(UdpReceiveResult { receive_result: msg }),
-            Message::Send(_) => self.send_results.push(UdpSendResult { send_result: msg }),
+            Message::Receive(_) => self.receive_results.push(UdpReceiveResult::try_from(msg)?),
+            Message::Send(_) => self.send_results.push(UdpSendResult::try_from(msg)?),
             _ => {
                 return Err(Box::new(error_gen!("unsupported message type for UDP stream-result")));
             }
@@ -741,8 +792,8 @@ impl StreamResults for UdpStreamResults {
         }
 
         serde_json::json!({
-            "receive": self.receive_results.iter().map(|rr| rr.to_result_json()).collect::<Vec<serde_json::Value>>(),
-            "send": self.send_results.iter().map(|sr| sr.to_result_json()).collect::<Vec<serde_json::Value>>(),
+            "receive": self.receive_results.iter().map(|rr| rr.try_into().unwrap()).collect::<Vec<serde_json::Value>>(),
+            "send": self.send_results.iter().map(|sr| sr.try_into().unwrap()).collect::<Vec<serde_json::Value>>(),
             "summary": summary,
         })
     }

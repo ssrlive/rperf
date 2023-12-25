@@ -20,10 +20,7 @@
 
 use crate::{
     error_gen,
-    protocol::{
-        messaging::Configuration,
-        results::{get_unix_timestamp, UdpReceiveResult, UdpSendResult},
-    },
+    protocol::{messaging::Configuration, results::get_unix_timestamp},
     BoxResult,
 };
 
@@ -69,9 +66,14 @@ impl UdpTestDefinition {
 }
 
 pub mod receiver {
-    use crate::protocol::messaging::{Message, TransmitState};
-    use crate::protocol::results::IntervalResultBox;
-    use crate::{error_gen, BoxResult};
+    use crate::{
+        error_gen,
+        protocol::{
+            messaging::{Message, TransmitState},
+            results::{IntervalResultBox, UdpReceiveResult},
+        },
+        BoxResult,
+    };
     use chrono::NaiveDateTime;
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -439,7 +441,7 @@ pub mod receiver {
                     ..TransmitState::default()
                 };
                 let receive_result = Message::Receive(receive_result);
-                Some(Ok(Box::new(super::UdpReceiveResult { receive_result })))
+                Some(Ok(Box::new(UdpReceiveResult::try_from(&receive_result).unwrap())))
             } else {
                 log::debug!("no bytes received via UDP stream {} in this interval", self.stream_idx);
                 None
@@ -462,9 +464,13 @@ pub mod receiver {
 }
 
 pub mod sender {
-    use crate::protocol::messaging::{Message, TransmitState};
-    use crate::protocol::results::IntervalResultBox;
-    use crate::BoxResult;
+    use crate::{
+        protocol::{
+            messaging::{Message, TransmitState},
+            results::{IntervalResultBox, UdpSendResult},
+        },
+        BoxResult,
+    };
     use std::net::UdpSocket;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::thread::sleep;
@@ -603,7 +609,7 @@ pub mod sender {
                                 ..TransmitState::default()
                             };
                             let send_result = Message::Send(send_result);
-                            return Some(Ok(Box::new(super::UdpSendResult { send_result })));
+                            return Some(Ok(Box::new(UdpSendResult { send_result })));
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -652,7 +658,7 @@ pub mod sender {
                     ..TransmitState::default()
                 };
                 let send_result = Message::Send(send_result);
-                Some(Ok(Box::new(super::UdpSendResult { send_result })))
+                Some(Ok(Box::new(UdpSendResult::try_from(&send_result).unwrap())))
             } else {
                 log::debug!(
                     "no bytes sent via UDP stream {} in this interval; shutting down...",

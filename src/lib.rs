@@ -6,4 +6,4 @@ pub mod server;
 pub(crate) mod stream;
 pub(crate) mod utils;
 
-pub use error::{BoxResult, Error, Result};
+pub use error::{BoxError, BoxResult, Error, Result};
