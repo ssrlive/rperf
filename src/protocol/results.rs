@@ -655,14 +655,10 @@ impl StreamResults for TcpStreamResults {
                 continue;
             }
 
-            let sr = if let Message::Send(ref sr) = sr.send_result {
-                sr
-            } else {
-                unreachable!();
-            };
-
-            duration_send += sr.duration as f64;
-            bytes_sent += sr.bytes_sent.unwrap();
+            if let Message::Send(ref sr) = sr.send_result {
+                duration_send += sr.duration as f64;
+                bytes_sent += sr.bytes_sent.unwrap();
+            }
         }
 
         for (i, rr) in self.receive_results.iter().enumerate() {
@@ -731,16 +727,12 @@ impl StreamResults for UdpStreamResults {
                 continue;
             }
 
-            let sr = if let Message::Send(ref sr) = sr.send_result {
-                sr
-            } else {
-                unreachable!();
-            };
+            if let Message::Send(ref sr) = sr.send_result {
+                duration_send += sr.duration as f64;
 
-            duration_send += sr.duration as f64;
-
-            bytes_sent += sr.bytes_sent.unwrap();
-            packets_sent += sr.packets_sent.unwrap();
+                bytes_sent += sr.bytes_sent.unwrap();
+                packets_sent += sr.packets_sent.unwrap();
+            }
         }
 
         for (i, rr) in self.receive_results.iter().enumerate() {
@@ -748,24 +740,20 @@ impl StreamResults for UdpStreamResults {
                 continue;
             }
 
-            let rr = if let Message::Receive(ref rr) = rr.receive_result {
-                rr
-            } else {
-                unreachable!();
-            };
+            if let Message::Receive(ref rr) = rr.receive_result {
+                duration_receive += rr.duration as f64;
 
-            duration_receive += rr.duration as f64;
+                bytes_received += rr.bytes_received.unwrap();
+                packets_received += rr.packets_received.unwrap();
+                packets_out_of_order += rr.packets_out_of_order.unwrap();
+                packets_duplicated += rr.packets_duplicated.unwrap();
 
-            bytes_received += rr.bytes_received.unwrap();
-            packets_received += rr.packets_received.unwrap();
-            packets_out_of_order += rr.packets_out_of_order.unwrap();
-            packets_duplicated += rr.packets_duplicated.unwrap();
+                if rr.jitter_seconds.is_some() {
+                    jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    unbroken_sequence_count += rr.unbroken_sequence.unwrap();
 
-            if rr.jitter_seconds.is_some() {
-                jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
-                unbroken_sequence_count += rr.unbroken_sequence.unwrap();
-
-                jitter_calculated = true;
+                    jitter_calculated = true;
+                }
             }
         }
 
@@ -935,14 +923,10 @@ impl TestResults for TcpTestResults {
                 if i < omit_seconds {
                     continue;
                 }
-                let sr = if let Message::Send(ref sr) = sr.send_result {
-                    sr
-                } else {
-                    unreachable!();
-                };
-
-                duration_send += sr.duration as f64;
-                bytes_sent += sr.bytes_sent.unwrap();
+                if let Message::Send(ref sr) = sr.send_result {
+                    duration_send += sr.duration as f64;
+                    bytes_sent += sr.bytes_sent.unwrap();
+                }
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -997,18 +981,14 @@ impl TestResults for TcpTestResults {
                     continue;
                 }
 
-                let sr = if let Message::Send(ref sr) = sr.send_result {
-                    sr
-                } else {
-                    unreachable!();
-                };
+                if let Message::Send(ref sr) = sr.send_result {
+                    duration_send += sr.duration as f64;
+                    stream_send_durations[stream_idx] += sr.duration as f64;
 
-                duration_send += sr.duration as f64;
-                stream_send_durations[stream_idx] += sr.duration as f64;
+                    bytes_sent += sr.bytes_sent.unwrap();
 
-                bytes_sent += sr.bytes_sent.unwrap();
-
-                sends_blocked |= sr.sends_blocked.unwrap() > 0;
+                    sends_blocked |= sr.sends_blocked.unwrap() > 0;
+                }
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -1216,16 +1196,12 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
-                let sr = if let Message::Send(ref sr) = sr.send_result {
-                    sr
-                } else {
-                    unreachable!();
-                };
+                if let Message::Send(ref sr) = sr.send_result {
+                    duration_send += sr.duration as f64;
 
-                duration_send += sr.duration as f64;
-
-                bytes_sent += sr.bytes_sent.unwrap();
-                packets_sent += sr.packets_sent.unwrap();
+                    bytes_sent += sr.bytes_sent.unwrap();
+                    packets_sent += sr.packets_sent.unwrap();
+                }
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -1233,24 +1209,20 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
-                let rr = if let Message::Receive(ref rr) = rr.receive_result {
-                    rr
-                } else {
-                    unreachable!();
-                };
+                if let Message::Receive(ref rr) = rr.receive_result {
+                    duration_receive += rr.duration as f64;
 
-                duration_receive += rr.duration as f64;
+                    bytes_received += rr.bytes_received.unwrap();
+                    packets_received += rr.packets_received.unwrap();
+                    packets_out_of_order += rr.packets_out_of_order.unwrap();
+                    packets_duplicated += rr.packets_duplicated.unwrap();
 
-                bytes_received += rr.bytes_received.unwrap();
-                packets_received += rr.packets_received.unwrap();
-                packets_out_of_order += rr.packets_out_of_order.unwrap();
-                packets_duplicated += rr.packets_duplicated.unwrap();
+                    if rr.jitter_seconds.is_some() {
+                        jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
+                        unbroken_sequence_count += rr.unbroken_sequence.unwrap();
 
-                if rr.jitter_seconds.is_some() {
-                    jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
-                    unbroken_sequence_count += rr.unbroken_sequence.unwrap();
-
-                    jitter_calculated = true;
+                        jitter_calculated = true;
+                    }
                 }
             }
         }
@@ -1319,19 +1291,15 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
-                let sr = if let Message::Send(ref sr) = sr.send_result {
-                    sr
-                } else {
-                    unreachable!();
-                };
+                if let Message::Send(ref sr) = sr.send_result {
+                    duration_send += sr.duration as f64;
+                    stream_send_durations[stream_idx] += sr.duration as f64;
 
-                duration_send += sr.duration as f64;
-                stream_send_durations[stream_idx] += sr.duration as f64;
+                    bytes_sent += sr.bytes_sent.unwrap();
+                    packets_sent += sr.packets_sent.unwrap();
 
-                bytes_sent += sr.bytes_sent.unwrap();
-                packets_sent += sr.packets_sent.unwrap();
-
-                sends_blocked |= sr.sends_blocked.unwrap() > 0;
+                    sends_blocked |= sr.sends_blocked.unwrap() > 0;
+                }
             }
 
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -1339,25 +1307,21 @@ impl TestResults for UdpTestResults {
                     continue;
                 }
 
-                let rr = if let Message::Receive(ref rr) = rr.receive_result {
-                    rr
-                } else {
-                    unreachable!();
-                };
+                if let Message::Receive(ref rr) = rr.receive_result {
+                    duration_receive += rr.duration as f64;
+                    stream_receive_durations[stream_idx] += rr.duration as f64;
 
-                duration_receive += rr.duration as f64;
-                stream_receive_durations[stream_idx] += rr.duration as f64;
+                    bytes_received += rr.bytes_received.unwrap();
+                    packets_received += rr.packets_received.unwrap();
+                    packets_out_of_order += rr.packets_out_of_order.unwrap();
+                    packets_duplicated += rr.packets_duplicated.unwrap();
 
-                bytes_received += rr.bytes_received.unwrap();
-                packets_received += rr.packets_received.unwrap();
-                packets_out_of_order += rr.packets_out_of_order.unwrap();
-                packets_duplicated += rr.packets_duplicated.unwrap();
+                    if rr.jitter_seconds.is_some() {
+                        jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
+                        unbroken_sequence_count += rr.unbroken_sequence.unwrap();
 
-                if rr.jitter_seconds.is_some() {
-                    jitter_weight += (rr.unbroken_sequence.unwrap() as f64) * (rr.jitter_seconds.unwrap() as f64);
-                    unbroken_sequence_count += rr.unbroken_sequence.unwrap();
-
-                    jitter_calculated = true;
+                        jitter_calculated = true;
+                    }
                 }
             }
         }
