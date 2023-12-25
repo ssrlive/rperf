@@ -37,7 +37,7 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// sends JSON data over a client-server communications stream
-pub fn send(stream: &mut TcpStream, message: &Message) -> BoxResult<()> {
+pub fn send_message(stream: &mut TcpStream, message: &Message) -> BoxResult<()> {
     stream.set_write_timeout(Some(POLL_TIMEOUT))?;
 
     let message = serde_json::to_value(message)?;
@@ -171,7 +171,7 @@ fn receive_payload(
 }
 
 /// handles the full process of retrieving a message from a client-server communications stream
-pub fn receive(
+pub fn receive_message(
     stream: &mut TcpStream,
     alive_check: fn() -> bool,
     results_handler: &mut dyn FnMut() -> BoxResult<()>,

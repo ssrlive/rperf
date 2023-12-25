@@ -26,7 +26,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::args::Args;
-use crate::protocol::communication::{receive, send};
+use crate::protocol::communication::{receive_message, send_message};
 use crate::protocol::messaging::{prepare_connect, Message};
 use crate::protocol::results::{IntervalResultBox, ServerDoneResult, ServerFailedResult};
 use crate::stream::{tcp, udp, TestStream};
@@ -62,14 +62,14 @@ fn handle_client(
         // drain all results every time this closer is invoked
         while let Ok(result) = results_rx.try_recv() {
             // if there's something to forward, write it to the client
-            send(&mut forwarding_send_stream, &result.to_message())?;
+            send_message(&mut forwarding_send_stream, &result.to_message())?;
         }
         Ok(())
     };
 
     //server operations are entirely driven by client-signalling, making this a (simple) state-machine
     while is_alive() {
-        let msg = receive(stream, is_alive, &mut results_handler)?;
+        let msg = receive_message(stream, is_alive, &mut results_handler)?;
 
         match &msg {
             Message::Configuration(cfg) => {
@@ -116,7 +116,7 @@ fn handle_client(
                     }
 
                     //let the client know we're ready to receive the connection; stream-ports are in stream-index order
-                    send(stream, &prepare_connect(&stream_ports))?;
+                    send_message(stream, &prepare_connect(&stream_ports))?;
                 } else {
                     //upload
                     log::info!("[{}] running in reverse-mode: server will be uploading data", &peer_addr);
@@ -164,7 +164,7 @@ fn handle_client(
                     }
 
                     //let the client know we're ready to begin
-                    send(stream, &Message::ConnectReady)?;
+                    send_message(stream, &Message::ConnectReady)?;
                 }
             }
             Message::Begin => {

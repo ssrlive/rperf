@@ -21,7 +21,7 @@
 use crate::{
     args, error_gen,
     protocol::{
-        communication::{receive, send},
+        communication::{receive_message, send_message},
         messaging::{prepare_download_configuration, prepare_upload_configuration, Message},
         results::{interval_result_from_message, ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
@@ -226,19 +226,19 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         let upload_config = Message::Configuration(upload_config.clone());
 
         //let the server know what we're expecting
-        send(&mut stream, &upload_config)?;
+        send_message(&mut stream, &upload_config)?;
     } else {
         log::debug!("running in forward-mode: server will be receiving data");
 
         let download_config = Message::Configuration(download_config.clone());
 
         //let the server know to prepare for us to connect
-        send(&mut stream, &download_config)?;
+        send_message(&mut stream, &download_config)?;
         //NOTE: we don't prepare to send data at this point; that happens in the loop below, after the server signals that it's ready
     }
 
     //now that the server knows what we need to do, we have to wait for its response
-    let connection_payload = receive(&mut stream, is_alive, &mut results_handler)?;
+    let connection_payload = receive_message(&mut stream, is_alive, &mut results_handler)?;
     match connection_payload {
         Message::Connect { stream_ports } => {
             // we need to connect to the server
@@ -297,7 +297,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         //if interrupted while waiting for the server to respond, there's no reason to continue
         log::info!("informing server that testing can begin...");
         //tell the server to start
-        send(&mut stream, &Message::Begin)?;
+        send_message(&mut stream, &Message::Begin)?;
 
         log::debug!("spawning stream-threads");
         // begin the test-streams
@@ -317,7 +317,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
         //watch for events from the server
         while is_alive() {
-            let msg = match receive(&mut stream, is_alive, &mut results_handler) {
+            let msg = match receive_message(&mut stream, is_alive, &mut results_handler) {
                 Ok(payload) => payload,
                 Err(e) => {
                     if !complete {
@@ -375,7 +375,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     }
 
     //assume this is a controlled shutdown; if it isn't, this is just a very slight waste of time
-    send(&mut stream, &Message::End)?;
+    send_message(&mut stream, &Message::End)?;
     thread::sleep(Duration::from_millis(250)); //wait a moment for the "end" message to be queued for delivery to the server
     stream.shutdown(Shutdown::Both)?;
 
