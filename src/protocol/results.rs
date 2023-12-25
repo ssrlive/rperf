@@ -50,7 +50,7 @@ pub fn get_unix_timestamp() -> f64 {
 pub trait IntervalResult {
     fn kind(&self) -> IntervalResultKind;
 
-    fn get_stream_idx(&self) -> u8;
+    fn get_stream_idx(&self) -> usize;
 
     fn to_message(&self) -> Message;
 
@@ -61,21 +61,21 @@ pub trait IntervalResult {
 pub type IntervalResultBox = Box<dyn IntervalResult + Sync + Send + 'static>;
 
 pub struct ClientDoneResult {
-    pub stream_idx: u8,
+    pub stream_idx: usize,
 }
 impl IntervalResult for ClientDoneResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::ClientDone
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         self.stream_idx
     }
 
     fn to_message(&self) -> Message {
         Message::Done(FinalState {
             origin: Some("client".to_string()),
-            stream_idx: Some(self.stream_idx as usize),
+            stream_idx: Some(self.stream_idx),
         })
     }
 
@@ -88,21 +88,21 @@ impl IntervalResult for ClientDoneResult {
     }
 }
 pub struct ServerDoneResult {
-    pub stream_idx: u8,
+    pub stream_idx: usize,
 }
 impl IntervalResult for ServerDoneResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::ServerDone
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         self.stream_idx
     }
 
     fn to_message(&self) -> Message {
         Message::Done(FinalState {
             origin: Some("server".to_string()),
-            stream_idx: Some(self.stream_idx as usize),
+            stream_idx: Some(self.stream_idx),
         })
     }
 
@@ -116,21 +116,21 @@ impl IntervalResult for ServerDoneResult {
 }
 
 pub struct ClientFailedResult {
-    pub stream_idx: u8,
+    pub stream_idx: usize,
 }
 impl IntervalResult for ClientFailedResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::ClientFailed
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         self.stream_idx
     }
 
     fn to_message(&self) -> Message {
         Message::Failed(FinalState {
             origin: Some("client".to_string()),
-            stream_idx: Some(self.stream_idx as usize),
+            stream_idx: Some(self.stream_idx),
         })
     }
 
@@ -143,21 +143,21 @@ impl IntervalResult for ClientFailedResult {
     }
 }
 pub struct ServerFailedResult {
-    pub stream_idx: u8,
+    pub stream_idx: usize,
 }
 impl IntervalResult for ServerFailedResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::ServerFailed
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         self.stream_idx
     }
 
     fn to_message(&self) -> Message {
         Message::Failed(FinalState {
             origin: Some("server".to_string()),
-            stream_idx: Some(self.stream_idx as usize),
+            stream_idx: Some(self.stream_idx),
         })
     }
 
@@ -204,7 +204,7 @@ impl IntervalResult for TcpReceiveResult {
         IntervalResultKind::TcpReceive
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         if let Message::Receive(ref receive_result) = self.receive_result {
             receive_result.stream_idx.unwrap_or(0)
         } else {
@@ -294,7 +294,7 @@ impl IntervalResult for TcpSendResult {
         IntervalResultKind::TcpSend
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         if let Message::Send(ref send_result) = self.send_result {
             send_result.stream_idx.unwrap_or(0)
         } else {
@@ -382,7 +382,7 @@ impl IntervalResult for UdpReceiveResult {
         IntervalResultKind::UdpReceive
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         if let Message::Receive(ref receive_result) = self.receive_result {
             receive_result.stream_idx.unwrap_or(0)
         } else {
@@ -487,7 +487,7 @@ impl IntervalResult for UdpSendResult {
         IntervalResultKind::UdpSend
     }
 
-    fn get_stream_idx(&self) -> u8 {
+    fn get_stream_idx(&self) -> usize {
         if let Message::Send(ref send_result) = self.send_result {
             send_result.stream_idx.unwrap_or(0)
         } else {
@@ -749,11 +749,11 @@ impl StreamResults for UdpStreamResults {
 }
 
 pub trait TestResults {
-    fn count_in_progress_streams(&self) -> u8;
-    fn mark_stream_done(&mut self, idx: &u8, success: bool);
+    fn count_in_progress_streams(&self) -> usize;
+    fn mark_stream_done(&mut self, idx: usize, success: bool);
 
-    fn count_in_progress_streams_server(&self) -> u8;
-    fn mark_stream_done_server(&mut self, idx: &u8);
+    fn count_in_progress_streams_server(&self) -> usize;
+    fn mark_stream_done_server(&mut self, idx: usize);
 
     fn is_success(&self) -> bool;
 
@@ -785,10 +785,10 @@ pub trait TestResults {
 }
 
 pub struct TcpTestResults {
-    stream_results: HashMap<u8, TcpStreamResults>,
-    pending_tests: HashSet<u8>,
-    failed_tests: HashSet<u8>,
-    server_tests_finished: HashSet<u8>,
+    stream_results: HashMap<usize, TcpStreamResults>,
+    pending_tests: HashSet<usize>,
+    failed_tests: HashSet<usize>,
+    server_tests_finished: HashSet<usize>,
 }
 impl TcpTestResults {
     pub fn new() -> TcpTestResults {
@@ -799,30 +799,30 @@ impl TcpTestResults {
             server_tests_finished: HashSet::new(),
         }
     }
-    pub fn prepare_index(&mut self, idx: &u8) {
+    pub fn prepare_index(&mut self, idx: usize) {
         self.stream_results.insert(
-            *idx,
+            idx,
             TcpStreamResults {
                 receive_results: Vec::new(),
                 send_results: Vec::new(),
             },
         );
-        self.pending_tests.insert(*idx);
+        self.pending_tests.insert(idx);
     }
 }
 impl TestResults for TcpTestResults {
-    fn count_in_progress_streams(&self) -> u8 {
-        self.pending_tests.len() as u8
+    fn count_in_progress_streams(&self) -> usize {
+        self.pending_tests.len()
     }
-    fn mark_stream_done(&mut self, idx: &u8, success: bool) {
-        self.pending_tests.remove(idx);
+    fn mark_stream_done(&mut self, idx: usize, success: bool) {
+        self.pending_tests.remove(&idx);
         if !success {
-            self.failed_tests.insert(*idx);
+            self.failed_tests.insert(idx);
         }
     }
 
-    fn count_in_progress_streams_server(&self) -> u8 {
-        let mut count: u8 = 0;
+    fn count_in_progress_streams_server(&self) -> usize {
+        let mut count = 0;
         for idx in self.stream_results.keys() {
             if !self.server_tests_finished.contains(idx) {
                 count += 1;
@@ -830,8 +830,8 @@ impl TestResults for TcpTestResults {
         }
         count
     }
-    fn mark_stream_done_server(&mut self, idx: &u8) {
-        self.server_tests_finished.insert(*idx);
+    fn mark_stream_done_server(&mut self, idx: usize) {
+        self.server_tests_finished.insert(idx);
     }
 
     fn is_success(&self) -> bool {
@@ -1055,10 +1055,10 @@ impl TestResults for TcpTestResults {
 }
 
 pub struct UdpTestResults {
-    stream_results: HashMap<u8, UdpStreamResults>,
-    pending_tests: HashSet<u8>,
-    failed_tests: HashSet<u8>,
-    server_tests_finished: HashSet<u8>,
+    stream_results: HashMap<usize, UdpStreamResults>,
+    pending_tests: HashSet<usize>,
+    failed_tests: HashSet<usize>,
+    server_tests_finished: HashSet<usize>,
 }
 impl UdpTestResults {
     pub fn new() -> UdpTestResults {
@@ -1069,30 +1069,30 @@ impl UdpTestResults {
             server_tests_finished: HashSet::new(),
         }
     }
-    pub fn prepare_index(&mut self, idx: &u8) {
+    pub fn prepare_index(&mut self, idx: usize) {
         self.stream_results.insert(
-            *idx,
+            idx,
             UdpStreamResults {
                 receive_results: Vec::new(),
                 send_results: Vec::new(),
             },
         );
-        self.pending_tests.insert(*idx);
+        self.pending_tests.insert(idx);
     }
 }
 impl TestResults for UdpTestResults {
-    fn count_in_progress_streams(&self) -> u8 {
-        self.pending_tests.len() as u8
+    fn count_in_progress_streams(&self) -> usize {
+        self.pending_tests.len()
     }
-    fn mark_stream_done(&mut self, idx: &u8, success: bool) {
-        self.pending_tests.remove(idx);
+    fn mark_stream_done(&mut self, idx: usize, success: bool) {
+        self.pending_tests.remove(&idx);
         if !success {
-            self.failed_tests.insert(*idx);
+            self.failed_tests.insert(idx);
         }
     }
 
-    fn count_in_progress_streams_server(&self) -> u8 {
-        let mut count: u8 = 0;
+    fn count_in_progress_streams_server(&self) -> usize {
+        let mut count = 0;
         for idx in self.stream_results.keys() {
             if !self.server_tests_finished.contains(idx) {
                 count += 1;
@@ -1100,8 +1100,8 @@ impl TestResults for UdpTestResults {
         }
         count
     }
-    fn mark_stream_done_server(&mut self, idx: &u8) {
-        self.server_tests_finished.insert(*idx);
+    fn mark_stream_done_server(&mut self, idx: usize) {
+        self.server_tests_finished.insert(idx);
     }
 
     fn is_success(&self) -> bool {

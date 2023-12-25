@@ -79,7 +79,7 @@ fn handle_client(
 
                     let stream_count = cfg.streams;
                     //since we're receiving data, we're also responsible for letting the client know where to send it
-                    let mut stream_ports = Vec::with_capacity(stream_count as usize);
+                    let mut stream_ports = Vec::with_capacity(stream_count);
 
                     if cfg.family.as_deref() == Some("udp") {
                         log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_count);
@@ -132,7 +132,7 @@ fn handle_client(
                             log::debug!("[{}] preparing UDP-sender for stream {}...", &peer_addr, stream_idx);
                             let test = udp::sender::UdpSender::new(
                                 test_definition.clone(),
-                                stream_idx as u8,
+                                stream_idx,
                                 0,
                                 peer_addr.ip(),
                                 port,
@@ -151,7 +151,7 @@ fn handle_client(
                             log::debug!("[{}] preparing TCP-sender for stream {}...", &peer_addr, stream_idx);
                             let test = tcp::sender::TcpSender::new(
                                 test_definition.clone(),
-                                stream_idx as u8,
+                                stream_idx,
                                 peer_addr.ip(),
                                 port,
                                 *cfg.duration.as_ref().unwrap_or(&0.0),

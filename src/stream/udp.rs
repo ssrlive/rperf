@@ -199,7 +199,7 @@ pub mod receiver {
     pub struct UdpReceiver {
         active: bool,
         test_definition: super::UdpTestDefinition,
-        stream_idx: u8,
+        stream_idx: usize,
         next_packet_id: u64,
 
         socket: UdpSocket,
@@ -208,7 +208,7 @@ pub mod receiver {
         #[allow(unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
-            stream_idx: u8,
+            stream_idx: usize,
             port_pool: &mut UdpPortPool,
             peer_ip: IpAddr,
             receive_buffer: usize,
@@ -451,7 +451,7 @@ pub mod receiver {
             Ok(socket_addr.port())
         }
 
-        fn get_idx(&self) -> u8 {
+        fn get_idx(&self) -> usize {
             self.stream_idx
         }
 
@@ -476,7 +476,7 @@ pub mod sender {
     pub struct UdpSender {
         active: bool,
         test_definition: super::UdpTestDefinition,
-        stream_idx: u8,
+        stream_idx: usize,
 
         socket: UdpSocket,
 
@@ -491,7 +491,7 @@ pub mod sender {
         #[allow(clippy::too_many_arguments, unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
-            stream_idx: u8,
+            stream_idx: usize,
             port: u16,
             receiver_ip: IpAddr,
             receiver_port: u16,
@@ -686,7 +686,7 @@ pub mod sender {
             Ok(socket_addr.port())
         }
 
-        fn get_idx(&self) -> u8 {
+        fn get_idx(&self) -> usize {
             self.stream_idx
         }
 

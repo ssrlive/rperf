@@ -191,7 +191,7 @@ pub mod receiver {
     pub struct TcpReceiver {
         active: AtomicBool,
         test_definition: super::TcpTestDefinition,
-        stream_idx: u8,
+        stream_idx: usize,
 
         listener: Option<TcpListener>,
         stream: Option<TcpStream>,
@@ -204,7 +204,7 @@ pub mod receiver {
     impl TcpReceiver {
         pub fn new(
             test_definition: super::TcpTestDefinition,
-            stream_idx: u8,
+            stream_idx: usize,
             port_pool: &mut TcpPortPool,
             peer_ip: IpAddr,
         ) -> BoxResult<TcpReceiver> {
@@ -459,7 +459,7 @@ pub mod receiver {
             }
         }
 
-        fn get_idx(&self) -> u8 {
+        fn get_idx(&self) -> usize {
             self.stream_idx
         }
 
@@ -487,7 +487,7 @@ pub mod sender {
     pub struct TcpSender {
         active: bool,
         test_definition: super::TcpTestDefinition,
-        stream_idx: u8,
+        stream_idx: usize,
 
         socket_addr: SocketAddr,
         stream: Option<TcpStream>,
@@ -505,7 +505,7 @@ pub mod sender {
         #[allow(clippy::too_many_arguments)]
         pub fn new(
             test_definition: super::TcpTestDefinition,
-            stream_idx: u8,
+            stream_idx: usize,
             receiver_ip: IpAddr,
             receiver_port: u16,
             send_duration: f32,
@@ -725,7 +725,7 @@ pub mod sender {
             }
         }
 
-        fn get_idx(&self) -> u8 {
+        fn get_idx(&self) -> usize {
             self.stream_idx
         }
 

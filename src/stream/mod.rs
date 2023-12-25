@@ -34,7 +34,7 @@ pub trait TestStream {
     /// return the port associated with the test-stream; this may vary over the test's lifetime
     fn get_port(&self) -> BoxResult<u16>;
     /// returns the index of the test, used to match client and server data
-    fn get_idx(&self) -> u8;
+    fn get_idx(&self) -> usize;
     /// stops a running test
     fn stop(&mut self);
 }

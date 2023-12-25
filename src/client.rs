@@ -79,19 +79,19 @@ fn connect_to_server(address: &str, port: u16) -> BoxResult<TcpStream> {
     Ok(stream)
 }
 
-fn prepare_test_results(is_udp: bool, stream_count: u8) -> Mutex<Box<dyn TestResults>> {
+fn prepare_test_results(is_udp: bool, stream_count: usize) -> Mutex<Box<dyn TestResults>> {
     if is_udp {
         //UDP
         let mut udp_test_results = UdpTestResults::new();
         for i in 0..stream_count {
-            udp_test_results.prepare_index(&i);
+            udp_test_results.prepare_index(i);
         }
         Mutex::new(Box::new(udp_test_results))
     } else {
         //TCP
         let mut tcp_test_results = TcpTestResults::new();
         for i in 0..stream_count {
-            tcp_test_results.prepare_index(&i);
+            tcp_test_results.prepare_index(i);
         }
         Mutex::new(Box::new(tcp_test_results))
     }
@@ -139,7 +139,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx) = channel::<IntervalResultBox>();
 
-    let test_results: Mutex<Box<dyn TestResults>> = prepare_test_results(is_udp, stream_count as u8);
+    let test_results: Mutex<Box<dyn TestResults>> = prepare_test_results(is_udp, stream_count);
 
     //a closure used to pass results from stream-handlers to the test-result structure
     let mut results_handler = || -> BoxResult<()> {
@@ -155,12 +155,13 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             let mut tr = test_results.lock().unwrap();
             match result.kind() {
                 IntervalResultKind::ClientDone | IntervalResultKind::ClientFailed => {
+                    let stream_idx = result.get_stream_idx();
                     if result.kind() == IntervalResultKind::ClientDone {
-                        log::info!("stream {} is done", result.get_stream_idx());
+                        log::info!("stream {} is done", stream_idx);
                     } else {
-                        log::warn!("stream {} failed", result.get_stream_idx());
+                        log::warn!("stream {} failed", stream_idx);
                     }
-                    tr.mark_stream_done(&result.get_stream_idx(), result.kind() == IntervalResultKind::ClientDone);
+                    tr.mark_stream_done(stream_idx, result.kind() == IntervalResultKind::ClientDone);
                     if tr.count_in_progress_streams() == 0 {
                         complete = true;
 
@@ -194,7 +195,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             log::info!("preparing for reverse-UDP test with {} streams...", stream_count);
 
             let test_definition = udp::UdpTestDefinition::new(&download_config)?;
-            for stream_idx in 0..stream_count as u8 {
+            for stream_idx in 0..stream_count {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
                     test_definition.clone(),
@@ -211,7 +212,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             log::info!("preparing for reverse-TCP test with {} streams...", stream_count);
 
             let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
-            for stream_idx in 0..stream_count as u8 {
+            for stream_idx in 0..stream_count {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
                 let test = tcp::receiver::TcpReceiver::new(test_definition.clone(), stream_idx, &mut tcp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
@@ -250,7 +251,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                     log::debug!("preparing UDP-sender for stream {}...", stream_idx);
                     let test = udp::sender::UdpSender::new(
                         test_definition.clone(),
-                        stream_idx as u8,
+                        stream_idx,
                         0,
                         server_addr.ip(),
                         port,
@@ -269,7 +270,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                     log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                     let test = tcp::sender::TcpSender::new(
                         test_definition.clone(),
-                        stream_idx as u8,
+                        stream_idx,
                         server_addr.ip(),
                         port,
                         *upload_config.duration.as_ref().unwrap_or(&0.0) as f32,
@@ -348,11 +349,11 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                                 }
                                 Message::Failed(_) => {
                                     log::warn!("server reported failure with stream {}", idx64);
-                                    tr.mark_stream_done(&(idx64 as u8), false);
+                                    tr.mark_stream_done(idx64, false);
                                 }
                                 _ => (), //not possible
                             }
-                            tr.mark_stream_done_server(&(idx64 as u8));
+                            tr.mark_stream_done_server(idx64);
                             if tr.count_in_progress_streams() == 0 && tr.count_in_progress_streams_server() == 0 {
                                 //all data gathered from both sides
                                 kill();

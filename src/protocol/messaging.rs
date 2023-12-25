@@ -27,7 +27,7 @@ pub struct Configuration {
     pub length: u32,
     pub receive_buffer: Option<u32>,
     pub role: String,
-    pub streams: u8,
+    pub streams: usize,
     pub test_id: Vec<u8>,
     pub bandwidth: Option<u64>,
     pub duration: Option<f32>,
@@ -41,7 +41,7 @@ pub struct Configuration {
 pub struct TransmitState {
     pub family: Option<String>,
     pub timestamp: f64,
-    pub stream_idx: Option<u8>,
+    pub stream_idx: Option<usize>,
     pub duration: f32,
     pub bytes_sent: Option<u64>,
     pub packets_sent: Option<u64>,
@@ -95,7 +95,7 @@ pub fn prepare_connect(stream_ports: &[u16]) -> Message {
 #[allow(clippy::too_many_arguments)]
 fn prepare_configuration_tcp_upload(
     test_id: &[u8; 16],
-    streams: u8,
+    streams: usize,
     bandwidth: u64,
     seconds: f32,
     length: usize,
@@ -120,7 +120,7 @@ fn prepare_configuration_tcp_upload(
 }
 
 /// prepares a message used to describe the download role of a TCP test
-fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: u8, length: usize, receive_buffer: u32) -> Configuration {
+fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: usize, length: usize, receive_buffer: u32) -> Configuration {
     Configuration {
         family: Some("tcp".to_string()),
         role: "download".to_string(),
@@ -140,7 +140,7 @@ fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: u8, length: u
 /// prepares a message used to describe the upload role of a UDP test
 fn prepare_configuration_udp_upload(
     test_id: &[u8; 16],
-    streams: u8,
+    streams: usize,
     bandwidth: u64,
     seconds: f32,
     length: u16,
@@ -164,7 +164,7 @@ fn prepare_configuration_udp_upload(
 }
 
 /// prepares a message used to describe the download role of a UDP test
-fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: u8, length: u16, receive_buffer: u32) -> Configuration {
+fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: usize, length: u16, receive_buffer: u32) -> Configuration {
     Configuration {
         family: Some("udp".to_string()),
         role: "download".to_string(),
@@ -181,7 +181,7 @@ fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: u8, length: u
     }
 }
 
-fn validate_streams(streams: u8) -> u8 {
+fn validate_streams(streams: usize) -> usize {
     if streams > 0 {
         streams
     } else {
@@ -227,7 +227,7 @@ fn calculate_length_udp(length: u16) -> u16 {
 
 /// prepares a message used to describe the upload role in a test
 pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<Configuration> {
-    let parallel_streams: u8 = args.parallel as u8;
+    let parallel_streams = args.parallel;
     let mut seconds: f32 = args.time as f32;
     let mut send_interval: f32 = args.send_interval as f32;
     let mut length: u32 = args.length as u32;
@@ -354,7 +354,7 @@ pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]
 }
 /// prepares a message used to describe the download role in a test
 pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<Configuration> {
-    let parallel_streams: u8 = args.parallel as u8;
+    let parallel_streams = args.parallel;
     let mut length: u32 = args.length as u32;
     let mut receive_buffer: u32 = args.receive_buffer as u32;
 
@@ -402,7 +402,7 @@ pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 1
 #[test]
 fn test_prepare_configuration_tcp_upload() {
     let test_id: [u8; 16] = [0; 16];
-    let streams: u8 = 1;
+    let streams: usize = 1;
     let bandwidth: u64 = 1024;
     let seconds: f32 = 1.0;
     let length: usize = 1024;
