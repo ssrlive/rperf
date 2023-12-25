@@ -24,7 +24,7 @@ use crate::{
     BoxResult,
 };
 
-use super::{parse_port_spec, TestStream, INTERVAL};
+use super::{parse_port_spec, INTERVAL};
 
 pub const TEST_HEADER_SIZE: u16 = 36;
 const UDP_HEADER_SIZE: u16 = 8;
@@ -72,6 +72,7 @@ pub mod receiver {
             messaging::{Message, TransmitState},
             results::{IntervalResultBox, UdpReceiveResult},
         },
+        stream::TestRunner,
         BoxResult,
     };
     use chrono::NaiveDateTime;
@@ -350,7 +351,7 @@ pub mod receiver {
             true
         }
     }
-    impl super::TestStream for UdpReceiver {
+    impl TestRunner for UdpReceiver {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let mut buf = vec![0_u8; self.test_definition.length.into()];
 
@@ -467,6 +468,7 @@ pub mod sender {
             messaging::{Message, TransmitState},
             results::{IntervalResultBox, UdpSendResult},
         },
+        stream::TestRunner,
         BoxResult,
     };
     use std::net::UdpSocket;
@@ -555,7 +557,7 @@ pub mod sender {
             Ok(())
         }
     }
-    impl super::TestStream for UdpSender {
+    impl TestRunner for UdpSender {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;

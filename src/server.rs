@@ -29,7 +29,7 @@ use crate::args::Args;
 use crate::protocol::communication::{receive_message, send_message};
 use crate::protocol::messaging::{prepare_connect, Message};
 use crate::protocol::results::{IntervalResultBox, ServerDoneResult, ServerFailedResult};
-use crate::stream::{tcp, udp, TestStream};
+use crate::stream::{tcp, udp, TestRunner};
 use crate::utils::cpu_affinity::CpuAffinityManager;
 use crate::BoxResult;
 
@@ -51,7 +51,7 @@ fn handle_client(
     let peer_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this client
-    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
+    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestRunner + Sync + Send)>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
 
     let (results_tx, results_rx) = mpsc::channel::<IntervalResultBox>();
@@ -230,7 +230,7 @@ fn handle_client(
 
 fn test_run_interval(
     c_cam: Arc<Mutex<CpuAffinityManager>>,
-    c_ps: Arc<Mutex<dyn TestStream + Send + Sync>>,
+    c_ps: Arc<Mutex<dyn TestRunner + Send + Sync>>,
     peer_addr: SocketAddr,
     c_results_tx: mpsc::Sender<IntervalResultBox>,
 ) -> BoxResult<()> {

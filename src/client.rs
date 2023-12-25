@@ -26,7 +26,7 @@ use crate::{
         results::{interval_result_from_message, ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
-    stream::{tcp, udp, TestStream},
+    stream::{tcp, udp, TestRunner},
     utils::cpu_affinity::CpuAffinityManager,
     BoxResult,
 };
@@ -135,7 +135,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
     //scaffolding to track and relay the streams and stream-results associated with this test
     let stream_count = download_config.streams as usize;
-    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
+    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestRunner + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx) = channel::<IntervalResultBox>();
 
@@ -469,7 +469,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 }
 
 fn client_test_run_interval(
-    c_ps: Arc<Mutex<dyn TestStream + Send + Sync>>,
+    c_ps: Arc<Mutex<dyn TestRunner + Send + Sync>>,
     c_cam: Arc<Mutex<CpuAffinityManager>>,
     c_results_tx: mpsc::Sender<IntervalResultBox>,
 ) -> BoxResult<()> {

@@ -20,7 +20,7 @@
 
 use crate::protocol::messaging::Configuration;
 use crate::protocol::results::get_unix_timestamp;
-use crate::stream::{parse_port_spec, TestStream, INTERVAL};
+use crate::stream::{parse_port_spec, INTERVAL};
 use crate::{error_gen, BoxResult};
 
 pub const TEST_HEADER_SIZE: usize = 16;
@@ -79,6 +79,7 @@ pub mod receiver {
             messaging::{Message, TransmitState},
             results::{IntervalResultBox, TcpReceiveResult},
         },
+        stream::TestRunner,
         BoxResult,
     };
 
@@ -433,7 +434,7 @@ pub mod receiver {
         }
     }
 
-    impl super::TestStream for TcpReceiver {
+    impl TestRunner for TcpReceiver {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let mut bytes_received = 0;
             let mut additional_time_elapsed = 0.0;
@@ -486,6 +487,7 @@ pub mod sender {
             messaging::{Message, TransmitState},
             results::{IntervalResultBox, TcpSendResult},
         },
+        stream::TestRunner,
         BoxResult,
     };
 
@@ -709,7 +711,7 @@ pub mod sender {
         }
     }
 
-    impl super::TestStream for TcpSender {
+    impl TestRunner for TcpSender {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             if self.stream.is_none() {
                 // if still in the setup phase, connect to the receiver
