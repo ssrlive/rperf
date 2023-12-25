@@ -194,11 +194,11 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             log::info!("preparing for reverse-UDP test with {} streams...", stream_count);
 
             let test_definition = udp::UdpTestDefinition::new(&download_config)?;
-            for stream_idx in 0..stream_count {
+            for stream_idx in 0..stream_count as u8 {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
                     test_definition.clone(),
-                    stream_idx as u8,
+                    stream_idx,
                     &mut udp_port_pool,
                     server_addr.ip(),
                     *download_config.receive_buffer.as_ref().unwrap() as usize,
@@ -211,10 +211,9 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             log::info!("preparing for reverse-TCP test with {} streams...", stream_count);
 
             let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
-            for stream_idx in 0..stream_count {
+            for stream_idx in 0..stream_count as u8 {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
-                let test =
-                    tcp::receiver::TcpReceiver::new(test_definition.clone(), stream_idx as u8, &mut tcp_port_pool, server_addr.ip())?;
+                let test = tcp::receiver::TcpReceiver::new(test_definition.clone(), stream_idx, &mut tcp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
@@ -301,7 +300,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
         log::debug!("spawning stream-threads");
         // begin the test-streams
-        for (stream_idx, parallel_stream) in parallel_streams.iter_mut().enumerate() {
+        for parallel_stream in parallel_streams.iter_mut() {
+            let stream_idx = parallel_stream.lock().unwrap().get_idx();
             log::info!("beginning execution of stream {}...", stream_idx);
             let c_ps = Arc::clone(parallel_stream);
             let c_results_tx = results_tx.clone();

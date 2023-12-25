@@ -43,7 +43,7 @@ static CLIENTS: AtomicU16 = AtomicU16::new(0);
 
 fn handle_client(
     stream: &mut TcpStream,
-    cpu_affinity_manager: Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>,
+    cpu_affinity_manager: Arc<Mutex<CpuAffinityManager>>,
     tcp_port_pool: Arc<Mutex<tcp::receiver::TcpPortPool>>,
     udp_port_pool: Arc<Mutex<udp::receiver::UdpPortPool>>,
 ) -> BoxResult<()> {
@@ -171,7 +171,8 @@ fn handle_client(
                 //the client has indicated that testing can begin
                 if !started {
                     //a simple guard to protect against reinitialisaion
-                    for (stream_idx, parallel_stream) in parallel_streams.iter_mut().enumerate() {
+                    for parallel_stream in parallel_streams.iter_mut() {
+                        let stream_idx = parallel_stream.lock().unwrap().get_idx();
                         log::info!("[{}] beginning execution of stream {}...", &peer_addr, stream_idx);
                         let c_ps = Arc::clone(parallel_stream);
                         let c_results_tx = results_tx.clone();
