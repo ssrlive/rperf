@@ -609,7 +609,7 @@ pub mod sender {
                                 ..TransmitState::default()
                             };
                             let send_result = Message::Send(send_result);
-                            return Some(Ok(Box::new(UdpSendResult { send_result })));
+                            return Some(Ok(Box::new(UdpSendResult::try_from(send_result).unwrap())));
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

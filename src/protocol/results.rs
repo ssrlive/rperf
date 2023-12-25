@@ -623,17 +623,17 @@ pub fn interval_result_from_message(msg: &Message) -> BoxResult<IntervalResultBo
     }
 }
 
-pub trait StreamResults {
+pub trait StreamResultCollection {
     fn update_from_message(&mut self, msg: &Message) -> BoxResult<()>;
 
     fn to_json(&self, omit_seconds: usize) -> serde_json::Value;
 }
 
-struct TcpStreamResults {
+struct TcpStreamResultCollection {
     receive_results: Vec<TcpReceiveResult>,
     send_results: Vec<TcpSendResult>,
 }
-impl StreamResults for TcpStreamResults {
+impl StreamResultCollection for TcpStreamResultCollection {
     fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
         match msg {
             Message::Receive(_) => self.receive_results.push(TcpReceiveResult::try_from(msg)?),
@@ -688,12 +688,12 @@ impl StreamResults for TcpStreamResults {
     }
 }
 
-struct UdpStreamResults {
+struct UdpStreamResultCollection {
     receive_results: Vec<UdpReceiveResult>,
     send_results: Vec<UdpSendResult>,
 }
 
-impl StreamResults for UdpStreamResults {
+impl StreamResultCollection for UdpStreamResultCollection {
     fn update_from_message(&mut self, msg: &Message) -> BoxResult<()> {
         match msg {
             Message::Receive(_) => self.receive_results.push(UdpReceiveResult::try_from(msg)?),
@@ -824,7 +824,7 @@ pub trait TestResults {
 }
 
 pub struct TcpTestResults {
-    stream_results: HashMap<usize, TcpStreamResults>,
+    stream_results: HashMap<usize, TcpStreamResultCollection>,
     pending_tests: HashSet<usize>,
     failed_tests: HashSet<usize>,
     server_tests_finished: HashSet<usize>,
@@ -841,7 +841,7 @@ impl TcpTestResults {
     pub fn prepare_index(&mut self, idx: usize) {
         self.stream_results.insert(
             idx,
-            TcpStreamResults {
+            TcpStreamResultCollection {
                 receive_results: Vec::new(),
                 send_results: Vec::new(),
             },
@@ -1086,7 +1086,7 @@ impl TestResults for TcpTestResults {
 }
 
 pub struct UdpTestResults {
-    stream_results: HashMap<usize, UdpStreamResults>,
+    stream_results: HashMap<usize, UdpStreamResultCollection>,
     pending_tests: HashSet<usize>,
     failed_tests: HashSet<usize>,
     server_tests_finished: HashSet<usize>,
@@ -1103,7 +1103,7 @@ impl UdpTestResults {
     pub fn prepare_index(&mut self, idx: usize) {
         self.stream_results.insert(
             idx,
-            UdpStreamResults {
+            UdpStreamResultCollection {
                 receive_results: Vec::new(),
                 send_results: Vec::new(),
             },
