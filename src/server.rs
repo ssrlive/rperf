@@ -271,9 +271,9 @@ impl Drop for ClientThreadMonitor {
     fn drop(&mut self) {
         CLIENTS.fetch_sub(1, Ordering::Relaxed);
         if thread::panicking() {
-            log::warn!("{} disconnecting due to panic", self.client_address);
+            log::warn!("[{}] disconnecting due to panic", self.client_address);
         } else {
-            log::info!("{} disconnected", self.client_address);
+            log::info!("[{}] disconnected", self.client_address);
         }
     }
 }
@@ -330,7 +330,9 @@ pub fn serve(args: &Args) -> BoxResult<()> {
         let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
         if client_limit > 0 && client_count > client_limit {
             log::warn!("client-limit ({}) reached; disconnecting {}...", client_limit, address.to_string());
-            stream.shutdown(Shutdown::Both).unwrap_or_default();
+            if let Err(e) = stream.shutdown(Shutdown::Both) {
+                log::trace!("error disconnecting [{}]: {}", address.to_string(), e);
+            }
             CLIENTS.fetch_sub(1, Ordering::Relaxed);
         } else {
             let c_cam = cpu_affinity_manager.clone();
@@ -349,7 +351,9 @@ pub fn serve(args: &Args) -> BoxResult<()> {
                 }
 
                 //in the event of panic, this will happen when the stream is dropped
-                stream.shutdown(Shutdown::Both).unwrap_or_default();
+                if let Err(e) = stream.shutdown(Shutdown::Both) {
+                    log::trace!("error disconnecting [{}]: {}", address.to_string(), e);
+                }
             })?;
         }
     }

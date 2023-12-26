@@ -375,9 +375,13 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     }
 
     //assume this is a controlled shutdown; if it isn't, this is just a very slight waste of time
-    send_message(&mut stream, &Message::End)?;
+    if let Err(e) = send_message(&mut stream, &Message::End) {
+        log::trace!("unable to send end-message to server: {}", e);
+    }
     thread::sleep(Duration::from_millis(250)); //wait a moment for the "end" message to be queued for delivery to the server
-    stream.shutdown(Shutdown::Both)?;
+    if let Err(err) = stream.shutdown(Shutdown::Both) {
+        log::trace!("unable to shutdown connection to server: {}", err);
+    }
 
     log::debug!("stopping any still-in-progress streams");
     for ps in parallel_streams.iter_mut() {
