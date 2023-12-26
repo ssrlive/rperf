@@ -28,7 +28,7 @@ pub struct Configuration {
     pub receive_buffer: Option<u32>,
     pub role: String,
     pub streams: usize,
-    pub test_id: Vec<u8>,
+    pub test_id: uuid::Uuid,
     pub bandwidth: Option<u64>,
     pub duration: Option<f32>,
     pub send_interval: Option<f32>,
@@ -94,7 +94,7 @@ pub fn prepare_connect(stream_ports: &[u16]) -> Message {
 /// prepares a message used to describe the upload role of a TCP test
 #[allow(clippy::too_many_arguments)]
 fn prepare_configuration_tcp_upload(
-    test_id: &[u8; 16],
+    test_id: uuid::Uuid,
     streams: usize,
     bandwidth: u64,
     seconds: f32,
@@ -106,7 +106,7 @@ fn prepare_configuration_tcp_upload(
     Configuration {
         family: Some("tcp".to_string()),
         role: "upload".to_string(),
-        test_id: test_id.to_vec(),
+        test_id,
         streams: validate_streams(streams),
         bandwidth: Some(validate_bandwidth(bandwidth)),
         duration: Some(seconds),
@@ -120,11 +120,11 @@ fn prepare_configuration_tcp_upload(
 }
 
 /// prepares a message used to describe the download role of a TCP test
-fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: usize, length: usize, receive_buffer: u32) -> Configuration {
+fn prepare_configuration_tcp_download(test_id: uuid::Uuid, streams: usize, length: usize, receive_buffer: u32) -> Configuration {
     Configuration {
         family: Some("tcp".to_string()),
         role: "download".to_string(),
-        test_id: test_id.to_vec(),
+        test_id,
         streams: validate_streams(streams),
         bandwidth: None,
         duration: None,
@@ -139,7 +139,7 @@ fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: usize, length
 
 /// prepares a message used to describe the upload role of a UDP test
 fn prepare_configuration_udp_upload(
-    test_id: &[u8; 16],
+    test_id: uuid::Uuid,
     streams: usize,
     bandwidth: u64,
     seconds: f32,
@@ -150,7 +150,7 @@ fn prepare_configuration_udp_upload(
     Configuration {
         family: Some("udp".to_string()),
         role: "upload".to_string(),
-        test_id: test_id.to_vec(),
+        test_id,
         streams: validate_streams(streams),
         bandwidth: Some(validate_bandwidth(bandwidth)),
         duration: Some(seconds),
@@ -164,11 +164,11 @@ fn prepare_configuration_udp_upload(
 }
 
 /// prepares a message used to describe the download role of a UDP test
-fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: usize, length: u16, receive_buffer: u32) -> Configuration {
+fn prepare_configuration_udp_download(test_id: uuid::Uuid, streams: usize, length: u16, receive_buffer: u32) -> Configuration {
     Configuration {
         family: Some("udp".to_string()),
         role: "download".to_string(),
-        test_id: test_id.to_vec(),
+        test_id,
         streams: validate_streams(streams),
         bandwidth: None,
         duration: None,
@@ -226,7 +226,7 @@ fn calculate_length_udp(length: u16) -> u16 {
 }
 
 /// prepares a message used to describe the upload role in a test
-pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<Configuration> {
+pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> BoxResult<Configuration> {
     let parallel_streams = args.parallel;
     let mut seconds: f32 = args.time as f32;
     let mut send_interval: f32 = args.send_interval as f32;
@@ -353,7 +353,7 @@ pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]
     }
 }
 /// prepares a message used to describe the download role in a test
-pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<Configuration> {
+pub fn prepare_download_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> BoxResult<Configuration> {
     let parallel_streams = args.parallel;
     let mut length: u32 = args.length as u32;
     let mut receive_buffer: u32 = args.receive_buffer as u32;
@@ -401,7 +401,7 @@ pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 1
 
 #[test]
 fn test_prepare_configuration_tcp_upload() {
-    let test_id: [u8; 16] = [0; 16];
+    let test_id = uuid::Uuid::new_v4();
     let streams: usize = 1;
     let bandwidth: u64 = 1024;
     let seconds: f32 = 1.0;
@@ -410,7 +410,7 @@ fn test_prepare_configuration_tcp_upload() {
     let send_buffer: u32 = 1024;
     let no_delay: bool = false;
 
-    let cfg = prepare_configuration_tcp_upload(&test_id, streams, bandwidth, seconds, length, send_interval, send_buffer, no_delay);
+    let cfg = prepare_configuration_tcp_upload(test_id, streams, bandwidth, seconds, length, send_interval, send_buffer, no_delay);
     let msg = serde_json::to_value(Message::Configuration(cfg)).unwrap();
     assert_eq!(msg["kind"], "configuration");
     assert_eq!(msg["family"], "tcp");

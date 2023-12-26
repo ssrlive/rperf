@@ -126,8 +126,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let is_udp = args.udp;
 
     let test_id = uuid::Uuid::new_v4();
-    let mut upload_config = prepare_upload_configuration(args, test_id.as_bytes())?;
-    let download_config = prepare_download_configuration(args, test_id.as_bytes())?;
+    let mut upload_config = prepare_upload_configuration(args, test_id)?;
+    let download_config = prepare_download_configuration(args, test_id)?;
 
     //connect to the server
     let mut stream = connect_to_server(args.client.as_ref().unwrap(), args.port)?;

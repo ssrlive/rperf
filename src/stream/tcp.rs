@@ -31,7 +31,7 @@ const KEEPALIVE_DURATION: std::time::Duration = std::time::Duration::from_secs(5
 #[derive(Clone)]
 pub struct TcpTestDefinition {
     //a UUID used to identify packets associated with this test
-    pub test_id: [u8; 16],
+    pub test_id: uuid::Uuid,
     //bandwidth target, in bytes/sec
     pub bandwidth: u64,
     //the length of the buffer to exchange
@@ -39,16 +39,6 @@ pub struct TcpTestDefinition {
 }
 impl TcpTestDefinition {
     pub fn new(cfg: &Configuration) -> BoxResult<TcpTestDefinition> {
-        let mut test_id_bytes = [0_u8; 16];
-
-        for (i, &v) in cfg.test_id.iter().enumerate() {
-            if i >= 16 {
-                //avoid out-of-bounds if given malicious data
-                break;
-            }
-            test_id_bytes[i] = v;
-        }
-
         let length = cfg.length as usize;
         if length < TEST_HEADER_SIZE {
             let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
@@ -58,7 +48,7 @@ impl TcpTestDefinition {
         let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
 
         Ok(TcpTestDefinition {
-            test_id: test_id_bytes,
+            test_id: cfg.test_id,
             bandwidth,
             length,
         })
@@ -314,7 +304,7 @@ pub mod receiver {
                             };
 
                             if !validated {
-                                if buf[..16] == self.test_definition.test_id {
+                                if uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.test_definition.test_id {
                                     log::debug!(
                                         "validated TCP stream {} connection from {}",
                                         self.stream_idx,
@@ -531,7 +521,7 @@ pub mod sender {
                 *staged_buffer_i = (i % 256) as u8;
             }
             //embed the test ID
-            staged_buffer[0..16].copy_from_slice(&test_definition.test_id);
+            staged_buffer[0..16].copy_from_slice(test_definition.test_id.as_bytes());
 
             Ok(TcpSender {
                 active: true,

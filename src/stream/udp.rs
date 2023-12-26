@@ -32,7 +32,7 @@ const UDP_HEADER_SIZE: u16 = 8;
 #[derive(Clone)]
 pub struct UdpTestDefinition {
     //a UUID used to identify packets associated with this test
-    pub test_id: [u8; 16],
+    pub test_id: uuid::Uuid,
     //bandwidth target, in bytes/sec
     pub bandwidth: u64,
     //the length of the buffer to exchange
@@ -40,15 +40,6 @@ pub struct UdpTestDefinition {
 }
 impl UdpTestDefinition {
     pub fn new(cfg: &Configuration) -> BoxResult<UdpTestDefinition> {
-        let mut test_id_bytes = [0_u8; 16];
-        for (i, &v) in cfg.test_id.iter().enumerate() {
-            if i >= 16 {
-                //avoid out-of-bounds if given malicious data
-                break;
-            }
-            test_id_bytes[i] = v;
-        }
-
         let length = cfg.length as u16;
         if length < TEST_HEADER_SIZE {
             let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
@@ -58,7 +49,7 @@ impl UdpTestDefinition {
         let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
 
         Ok(UdpTestDefinition {
-            test_id: test_id_bytes,
+            test_id: cfg.test_id,
             bandwidth,
             length,
         })
@@ -320,7 +311,7 @@ pub mod receiver {
 
         fn process_packet(&mut self, packet: &[u8], history: &mut UdpReceiverIntervalHistory) -> bool {
             //the first sixteen bytes are the test's ID
-            if packet[0..16] != self.test_definition.test_id {
+            if uuid::Uuid::from_bytes((&packet[..16]).try_into().unwrap()) != self.test_definition.test_id {
                 return false;
             }
 
@@ -394,7 +385,7 @@ pub mod receiver {
                 );
                 if packet_size == 16 {
                     // possible end-of-test message
-                    if buf[0..16] == self.test_definition.test_id {
+                    if uuid::Uuid::from_bytes((&buf[..16]).try_into().unwrap()) == self.test_definition.test_id {
                         // test's over
                         self.stop();
                         break;
@@ -528,7 +519,7 @@ pub mod sender {
                 staged_packet[i as usize] = (i % 256) as u8;
             }
             //embed the test ID
-            staged_packet[0..16].copy_from_slice(&test_definition.test_id);
+            staged_packet[0..16].copy_from_slice(test_definition.test_id.as_bytes());
 
             Ok(UdpSender {
                 active: true,
