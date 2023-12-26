@@ -115,7 +115,7 @@ fn prepare_configuration_tcp_upload(
         send_buffer: Some(send_buffer),
         no_delay: Some(no_delay),
         receive_buffer: Some(0),
-        stream_ports: None,
+        ..Configuration::default()
     }
 }
 
@@ -126,14 +126,9 @@ fn prepare_configuration_tcp_download(test_id: uuid::Uuid, streams: usize, lengt
         role: "download".to_string(),
         test_id,
         streams: validate_streams(streams),
-        bandwidth: None,
-        duration: None,
         length: calculate_length_tcp(length) as u32,
-        send_interval: None,
-        send_buffer: None,
-        no_delay: None,
         receive_buffer: Some(receive_buffer),
-        stream_ports: None,
+        ..Configuration::default()
     }
 }
 
@@ -157,9 +152,7 @@ fn prepare_configuration_udp_upload(
         length: calculate_length_udp(length) as u32,
         send_interval: Some(validate_send_interval(send_interval)),
         send_buffer: Some(send_buffer),
-        no_delay: None,
-        receive_buffer: None,
-        stream_ports: None,
+        ..Configuration::default()
     }
 }
 
@@ -170,14 +163,9 @@ fn prepare_configuration_udp_download(test_id: uuid::Uuid, streams: usize, lengt
         role: "download".to_string(),
         test_id,
         streams: validate_streams(streams),
-        bandwidth: None,
-        duration: None,
         length: calculate_length_udp(length) as u32,
-        send_interval: None,
-        send_buffer: None,
-        no_delay: None,
         receive_buffer: Some(receive_buffer),
-        stream_ports: None,
+        ..Configuration::default()
     }
 }
 
