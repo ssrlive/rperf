@@ -18,7 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::BoxResult;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -91,84 +90,6 @@ pub fn prepare_connect(stream_ports: &[u16]) -> Message {
     }
 }
 
-/// prepares a message used to describe the upload role of a TCP test
-#[allow(clippy::too_many_arguments)]
-fn prepare_configuration_tcp_upload(
-    test_id: uuid::Uuid,
-    streams: usize,
-    bandwidth: u64,
-    seconds: f32,
-    length: usize,
-    send_interval: f32,
-    send_buffer: u32,
-    no_delay: bool,
-) -> Configuration {
-    Configuration {
-        family: Some("tcp".to_string()),
-        role: "upload".to_string(),
-        test_id,
-        streams: validate_streams(streams),
-        bandwidth: Some(validate_bandwidth(bandwidth)),
-        duration: Some(seconds),
-        length: calculate_length_tcp(length) as u32,
-        send_interval: Some(validate_send_interval(send_interval)),
-        send_buffer: Some(send_buffer),
-        no_delay: Some(no_delay),
-        receive_buffer: Some(0),
-        ..Configuration::default()
-    }
-}
-
-/// prepares a message used to describe the download role of a TCP test
-fn prepare_configuration_tcp_download(test_id: uuid::Uuid, streams: usize, length: usize, receive_buffer: u32) -> Configuration {
-    Configuration {
-        family: Some("tcp".to_string()),
-        role: "download".to_string(),
-        test_id,
-        streams: validate_streams(streams),
-        length: calculate_length_tcp(length) as u32,
-        receive_buffer: Some(receive_buffer),
-        ..Configuration::default()
-    }
-}
-
-/// prepares a message used to describe the upload role of a UDP test
-fn prepare_configuration_udp_upload(
-    test_id: uuid::Uuid,
-    streams: usize,
-    bandwidth: u64,
-    seconds: f32,
-    length: u16,
-    send_interval: f32,
-    send_buffer: u32,
-) -> Configuration {
-    Configuration {
-        family: Some("udp".to_string()),
-        role: "upload".to_string(),
-        test_id,
-        streams: validate_streams(streams),
-        bandwidth: Some(validate_bandwidth(bandwidth)),
-        duration: Some(seconds),
-        length: calculate_length_udp(length) as u32,
-        send_interval: Some(validate_send_interval(send_interval)),
-        send_buffer: Some(send_buffer),
-        ..Configuration::default()
-    }
-}
-
-/// prepares a message used to describe the download role of a UDP test
-fn prepare_configuration_udp_download(test_id: uuid::Uuid, streams: usize, length: u16, receive_buffer: u32) -> Configuration {
-    Configuration {
-        family: Some("udp".to_string()),
-        role: "download".to_string(),
-        test_id,
-        streams: validate_streams(streams),
-        length: calculate_length_udp(length) as u32,
-        receive_buffer: Some(receive_buffer),
-        ..Configuration::default()
-    }
-}
-
 fn validate_streams(streams: usize) -> usize {
     if streams > 0 {
         streams
@@ -196,33 +117,40 @@ fn validate_send_interval(send_interval: f32) -> f32 {
     }
 }
 
-fn calculate_length_tcp(length: usize) -> usize {
-    if length < crate::stream::tcp::TEST_HEADER_SIZE {
-        //length must be at least enough to hold the test data
-        crate::stream::tcp::TEST_HEADER_SIZE
+fn calculate_length_final(length: u32, udp: bool) -> u32 {
+    if udp {
+        if length < crate::stream::udp::TEST_HEADER_SIZE as u32 {
+            // length must be at least enough to hold the test data
+            crate::stream::udp::TEST_HEADER_SIZE as u32
+        } else {
+            length
+        }
+    } else if length < crate::stream::tcp::TEST_HEADER_SIZE as u32 {
+        // length must be at least enough to hold the test data
+        crate::stream::tcp::TEST_HEADER_SIZE as u32
     } else {
         length
     }
 }
-fn calculate_length_udp(length: u16) -> u16 {
-    if length < crate::stream::udp::TEST_HEADER_SIZE {
-        //length must be at least enough to hold the test data
-        crate::stream::udp::TEST_HEADER_SIZE
-    } else {
-        length
+
+fn calc_send_interval(mut send_interval: f32) -> f32 {
+    if send_interval > 1.0 || send_interval <= 0.0 {
+        log::warn!("send-interval was not in an acceptable range and has been set to 0.05");
+        send_interval = 0.05
     }
+    send_interval
 }
 
-/// prepares a message used to describe the upload role in a test
-pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> BoxResult<Configuration> {
-    let parallel_streams = args.parallel;
-    let mut seconds: f32 = args.time as f32;
-    let mut send_interval: f32 = args.send_interval as f32;
-    let mut length: u32 = args.length as u32;
+fn calc_seconds(mut seconds: f32) -> f32 {
+    if seconds <= 0.0 {
+        log::warn!("time was not in an acceptable range and has been set to 0.0");
+        seconds = 0.0
+    }
+    seconds
+}
 
-    let mut send_buffer: u32 = args.send_buffer as u32;
-
-    let mut bandwidth_string = args.bandwidth.as_str();
+fn calc_bandwidth(bandwidth_s: &str) -> u64 {
+    let mut bandwidth_string = bandwidth_s;
     let bandwidth: u64;
     let bandwidth_multiplier: f64;
     match bandwidth_string.chars().last() {
@@ -268,122 +196,71 @@ pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: uuid::Uui
                 }
                 Err(_) => {
                     //invalid input; fall back to 1mbps
-                    log::warn!("invalid bandwidth: {}; setting value to 1mbps", args.bandwidth);
+                    log::warn!("invalid bandwidth: {}; setting value to 1mbps", bandwidth_s);
                     bandwidth = 125000;
                 }
             }
         }
         None => {
             //invalid input; fall back to 1mbps
-            log::warn!("invalid bandwidth: {}; setting value to 1mbps", args.bandwidth);
+            log::warn!("invalid bandwidth: {}; setting value to 1mbps", bandwidth_s);
             bandwidth = 125000;
         }
     }
-
-    if seconds <= 0.0 {
-        log::warn!("time was not in an acceptable range and has been set to 0.0");
-        seconds = 0.0
-    }
-
-    if send_interval > 1.0 || send_interval <= 0.0 {
-        log::warn!("send-interval was not in an acceptable range and has been set to 0.05");
-        send_interval = 0.05
-    }
-
-    if args.udp {
-        log::debug!("preparing UDP upload config...");
-        if length == 0 {
-            length = 1024;
-        }
-        if send_buffer != 0 && send_buffer < length {
-            log::warn!(
-                "requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
-                send_buffer,
-                length * 2
-            );
-            send_buffer = length * 2;
-        }
-        Ok(prepare_configuration_udp_upload(
-            test_id,
-            parallel_streams,
-            bandwidth,
-            seconds,
-            length as u16,
-            send_interval,
-            send_buffer,
-        ))
-    } else {
-        log::debug!("preparing TCP upload config...");
-        if length == 0 {
-            length = 32 * 1024;
-        }
-        if send_buffer != 0 && send_buffer < length {
-            log::warn!(
-                "requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
-                send_buffer,
-                length * 2
-            );
-            send_buffer = length * 2;
-        }
-
-        let no_delay: bool = args.no_delay;
-
-        Ok(prepare_configuration_tcp_upload(
-            test_id,
-            parallel_streams,
-            bandwidth,
-            seconds,
-            length as usize,
-            send_interval,
-            send_buffer,
-            no_delay,
-        ))
-    }
+    bandwidth
 }
-/// prepares a message used to describe the download role in a test
-pub fn prepare_download_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> BoxResult<Configuration> {
-    let parallel_streams = args.parallel;
-    let mut length: u32 = args.length as u32;
-    let mut receive_buffer: u32 = args.receive_buffer as u32;
 
-    if args.udp {
-        log::debug!("preparing UDP download config...");
+fn calc_exchange_length(mut length: u32, udp: bool) -> u32 {
+    if udp {
         if length == 0 {
             length = 1024;
         }
-        if receive_buffer != 0 && receive_buffer < length {
-            log::warn!(
-                "requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
-                receive_buffer,
-                length * 2
-            );
-            receive_buffer = length * 2;
-        }
-        Ok(prepare_configuration_udp_download(
-            test_id,
-            parallel_streams,
-            length as u16,
-            receive_buffer,
-        ))
-    } else {
-        log::debug!("preparing TCP download config...");
-        if length == 0 {
-            length = 32 * 1024;
-        }
-        if receive_buffer != 0 && receive_buffer < length {
-            log::warn!(
-                "requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
-                receive_buffer,
-                length * 2
-            );
-            receive_buffer = length * 2;
-        }
-        Ok(prepare_configuration_tcp_download(
-            test_id,
-            parallel_streams,
-            length as usize,
-            receive_buffer,
-        ))
+    } else if length == 0 {
+        length = 32 * 1024;
+    }
+    length
+}
+
+fn calc_buffer_length(mut buffer_length: u32, exchange_length: u32) -> u32 {
+    if buffer_length != 0 && buffer_length < exchange_length {
+        log::warn!(
+            "requested receive or send buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
+            buffer_length,
+            exchange_length * 2
+        );
+        buffer_length = exchange_length * 2;
+    }
+    buffer_length
+}
+
+/// prepares a message used to describe the download/upload role in a test
+pub fn prepare_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> Configuration {
+    let parallel_streams = args.parallel;
+    let seconds: f32 = calc_seconds(args.time as f32);
+    let send_interval: f32 = calc_send_interval(args.send_interval as f32);
+    let bandwidth: u64 = calc_bandwidth(args.bandwidth.as_str());
+    let length: u32 = calc_exchange_length(args.length as u32, args.udp);
+    let send_buffer = calc_buffer_length(args.send_buffer as u32, length);
+    let receive_buffer = calc_buffer_length(args.receive_buffer as u32, length);
+
+    let role = if args.reverse { "upload" } else { "download" };
+    let family = if args.udp { "udp" } else { "tcp" };
+    let no_delay = if args.udp { None } else { Some(args.no_delay) };
+    let length = calculate_length_final(length, args.udp);
+
+    Configuration {
+        family: Some(family.to_string()),
+        role: role.to_string(),
+        test_id,
+        streams: validate_streams(parallel_streams),
+        bandwidth: Some(validate_bandwidth(bandwidth)),
+        duration: Some(seconds),
+        length,
+        send_interval: Some(validate_send_interval(send_interval)),
+        send_buffer: Some(send_buffer),
+        no_delay,
+        receive_buffer: Some(receive_buffer),
+        ..Configuration::default()
     }
 }
 
@@ -398,7 +275,20 @@ fn test_prepare_configuration_tcp_upload() {
     let send_buffer: u32 = 1024;
     let no_delay: bool = false;
 
-    let cfg = prepare_configuration_tcp_upload(test_id, streams, bandwidth, seconds, length, send_interval, send_buffer, no_delay);
+    let cfg = Configuration {
+        family: Some("tcp".to_string()),
+        role: "upload".to_string(),
+        test_id,
+        streams,
+        bandwidth: Some(bandwidth),
+        duration: Some(seconds),
+        length: length as u32,
+        send_interval: Some(send_interval),
+        send_buffer: Some(send_buffer),
+        no_delay: Some(no_delay),
+        receive_buffer: Some(0),
+        ..Configuration::default()
+    };
     let msg = serde_json::to_value(Message::Configuration(cfg)).unwrap();
     assert_eq!(msg["kind"], "configuration");
     assert_eq!(msg["family"], "tcp");
