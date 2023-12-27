@@ -36,7 +36,10 @@ pub struct TcpTestDefinition {
     pub bandwidth: u64,
     //the length of the buffer to exchange
     pub length: usize,
+    // whether to reverse the NAT
+    pub reverse_nat: bool,
 }
+
 impl TcpTestDefinition {
     pub fn new(cfg: &Configuration) -> BoxResult<TcpTestDefinition> {
         let length = cfg.length as usize;
@@ -46,11 +49,13 @@ impl TcpTestDefinition {
         }
 
         let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
+        let reverse_nat = *cfg.reverse_nat.as_ref().unwrap_or(&false);
 
         Ok(TcpTestDefinition {
             test_id: cfg.test_id,
             bandwidth,
             length,
+            reverse_nat,
         })
     }
 }
@@ -422,6 +427,86 @@ pub mod receiver {
                 None
             }
         }
+
+        fn process_stream_send(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> Option<BoxResult<IntervalResultBox>> {
+            let stream = self.stream.as_mut().unwrap();
+            let peer_addr = match stream.peer_addr() {
+                Ok(pa) => pa,
+                Err(e) => return Some(Err(Box::new(e))),
+            };
+
+            let mut bytes_received: u64 = _bytes_received;
+
+            let additional_time_elapsed: f32 = _additional_time_elapsed;
+
+            let mio_token = self.mio_token;
+            let mut buf = vec![0_u8; self.test_definition.length];
+
+            let start = Instant::now();
+
+            while self.active.load(Relaxed) && start.elapsed() < super::INTERVAL {
+                log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
+                self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
+                for event in self.mio_events.iter() {
+                    if event.token() == mio_token {
+                        loop {
+                            let packet_size = match stream.read(&mut buf) {
+                                Ok(packet_size) => packet_size,
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                                    // receive timeout
+                                    break;
+                                }
+                                Err(e) => {
+                                    return Some(Err(Box::new(e)));
+                                }
+                            };
+
+                            log::trace!(
+                                "received {} bytes in TCP stream {} from {}",
+                                packet_size,
+                                self.stream_idx,
+                                peer_addr
+                            );
+                            if packet_size == 0 {
+                                // test's over
+                                // HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
+                                self.active.store(false, Relaxed);
+                                break;
+                            }
+
+                            bytes_received += packet_size as u64;
+                        }
+                    } else {
+                        log::warn!("got event for unbound token: {:?}", event);
+                    }
+                }
+            }
+            if bytes_received > 0 {
+                log::debug!(
+                    "{} bytes received via TCP stream {} from {} in this interval; reporting...",
+                    bytes_received,
+                    self.stream_idx,
+                    peer_addr
+                );
+                let receive_result = TransmitState {
+                    timestamp: super::get_unix_timestamp(),
+                    stream_idx: Some(self.stream_idx),
+                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
+                    bytes_received: Some(bytes_received),
+                    family: Some("tcp".to_string()),
+                    ..TransmitState::default()
+                };
+                let receive_result = Message::Receive(receive_result);
+                Some(Ok(Box::new(TcpReceiveResult::try_from(&receive_result).unwrap())))
+            } else {
+                log::debug!(
+                    "no bytes received via TCP stream {} from {} in this interval",
+                    self.stream_idx,
+                    peer_addr
+                );
+                None
+            }
+        }
     }
 
     impl TestRunner for TcpReceiver {
@@ -441,8 +526,13 @@ pub mod receiver {
                 bytes_received += bytes_received_in_validation;
                 additional_time_elapsed += time_spent_in_validation;
             }
-            let res = self.process_stream_receive(bytes_received, additional_time_elapsed)?;
-            Some(res)
+            if self.test_definition.reverse_nat {
+                let res = self.process_stream_send(bytes_received, additional_time_elapsed)?;
+                Some(res)
+            } else {
+                let res = self.process_stream_receive(bytes_received, additional_time_elapsed)?;
+                Some(res)
+            }
         }
 
         fn get_port(&self) -> BoxResult<u16> {

@@ -27,6 +27,7 @@ pub struct Configuration {
     pub length: u32,
     pub receive_buffer: Option<u32>,
     pub role: String,
+    pub reverse_nat: Option<bool>,
     pub streams: usize,
     pub test_id: uuid::Uuid,
     pub bandwidth: Option<u64>,

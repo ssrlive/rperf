@@ -228,7 +228,12 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         //let the server know what we're expecting
         send_message(&mut stream, &upload_config)?;
     } else {
-        log::debug!("running in forward-mode: server will be receiving data");
+        if args.reverse_nat {
+            log::debug!("running in reverse-NAT-mode: server will be receiving data");
+            download_config.reverse_nat = Some(true);
+        } else {
+            log::debug!("running in forward-mode: server will be receiving data");
+        }
 
         let download_config = Message::Configuration(download_config.clone());
 

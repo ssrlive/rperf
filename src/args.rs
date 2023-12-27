@@ -46,8 +46,12 @@ pub struct Args {
     pub client: Option<String>,
 
     /// run in reverse-mode (server sends, client receives)
-    #[arg(short = 'R', long, conflicts_with = "server")]
+    #[arg(short = 'R', long, conflicts_with_all = ["server", "reverse_nat"])]
     pub reverse: bool,
+
+    /// run in reverse-mode (server sends, client receives), but through NAT
+    #[arg(short = 'n', long, conflicts_with_all = ["server", "reverse"])]
+    pub reverse_nat: bool,
 
     /// the format in which to deplay information (json, megabit/sec, megabyte/sec)
     #[arg(
