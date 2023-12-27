@@ -18,52 +18,17 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    error_gen,
-    protocol::{messaging::Configuration, results::get_unix_timestamp},
-    BoxResult,
-};
-
-use super::{parse_port_spec, INTERVAL};
-
 pub const TEST_HEADER_SIZE: u16 = 36;
 const UDP_HEADER_SIZE: u16 = 8;
-
-#[derive(Clone)]
-pub struct UdpTestDefinition {
-    //a UUID used to identify packets associated with this test
-    pub test_id: uuid::Uuid,
-    //bandwidth target, in bytes/sec
-    pub bandwidth: u64,
-    //the length of the buffer to exchange
-    pub length: u16,
-}
-impl UdpTestDefinition {
-    pub fn new(cfg: &Configuration) -> BoxResult<UdpTestDefinition> {
-        let length = cfg.length as u16;
-        if length < TEST_HEADER_SIZE {
-            let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
-            return Err(Box::new(error_gen!(err)));
-        }
-
-        let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
-
-        Ok(UdpTestDefinition {
-            test_id: cfg.test_id,
-            bandwidth,
-            length,
-        })
-    }
-}
 
 pub mod receiver {
     use crate::{
         error_gen,
         protocol::{
-            messaging::{Message, TransmitState},
-            results::{IntervalResultBox, UdpReceiveResult},
+            messaging::{Configuration, Message, TransmitState},
+            results::{get_unix_timestamp, IntervalResultBox, UdpReceiveResult},
         },
-        stream::TestRunner,
+        stream::{parse_port_spec, TestRunner, INTERVAL},
         BoxResult,
     };
     use chrono::NaiveDateTime;
@@ -85,14 +50,14 @@ pub mod receiver {
     }
     impl UdpPortPool {
         pub fn new(port_spec: &str, port_spec6: &str) -> UdpPortPool {
-            let ports = super::parse_port_spec(port_spec);
+            let ports = parse_port_spec(port_spec);
             if !ports.is_empty() {
                 log::debug!("configured IPv4 UDP port pool: {:?}", ports);
             } else {
                 log::debug!("using OS assignment for IPv4 UDP ports");
             }
 
-            let ports6 = super::parse_port_spec(port_spec6);
+            let ports6 = parse_port_spec(port_spec6);
             if !ports.is_empty() {
                 log::debug!("configured IPv6 UDP port pool: {:?}", ports6);
             } else {
@@ -192,7 +157,7 @@ pub mod receiver {
 
     pub struct UdpReceiver {
         active: bool,
-        test_definition: super::UdpTestDefinition,
+        cfg: Configuration,
         stream_idx: usize,
         next_packet_id: u64,
 
@@ -201,7 +166,7 @@ pub mod receiver {
     impl UdpReceiver {
         #[allow(unused_variables)]
         pub fn new(
-            test_definition: super::UdpTestDefinition,
+            cfg: &Configuration,
             stream_idx: usize,
             port_pool: &mut UdpPortPool,
             peer_ip: IpAddr,
@@ -221,7 +186,7 @@ pub mod receiver {
 
             Ok(UdpReceiver {
                 active: true,
-                test_definition,
+                cfg: cfg.clone(),
                 stream_idx,
 
                 next_packet_id: 0,
@@ -311,7 +276,7 @@ pub mod receiver {
 
         fn process_packet(&mut self, packet: &[u8], history: &mut UdpReceiverIntervalHistory) -> bool {
             //the first sixteen bytes are the test's ID
-            if uuid::Uuid::from_bytes((&packet[..16]).try_into().unwrap()) != self.test_definition.test_id {
+            if uuid::Uuid::from_bytes((&packet[..16]).try_into().unwrap()) != self.cfg.test_id {
                 return false;
             }
 
@@ -344,7 +309,7 @@ pub mod receiver {
     }
     impl TestRunner for UdpReceiver {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
-            let mut buf = vec![0_u8; self.test_definition.length.into()];
+            let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let mut bytes_received: u64 = 0;
 
@@ -364,7 +329,7 @@ pub mod receiver {
 
             let start = Instant::now();
 
-            while self.active && start.elapsed() < super::INTERVAL {
+            while self.active && start.elapsed() < INTERVAL {
                 log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
                 let (packet_size, peer_addr) = match self.socket.recv_from(&mut buf) {
                     Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
@@ -385,7 +350,7 @@ pub mod receiver {
                 );
                 if packet_size == 16 {
                     // possible end-of-test message
-                    if uuid::Uuid::from_bytes((&buf[..16]).try_into().unwrap()) == self.test_definition.test_id {
+                    if uuid::Uuid::from_bytes((&buf[..16]).try_into().unwrap()) == self.cfg.test_id {
                         // test's over
                         self.stop();
                         break;
@@ -418,7 +383,7 @@ pub mod receiver {
 
                 let receive_result = TransmitState {
                     family: Some("udp".to_string()),
-                    timestamp: super::get_unix_timestamp(),
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: start.elapsed().as_secs_f32(),
                     bytes_received: Some(bytes_received),
@@ -456,10 +421,10 @@ pub mod receiver {
 pub mod sender {
     use crate::{
         protocol::{
-            messaging::{Message, TransmitState},
-            results::{IntervalResultBox, UdpSendResult},
+            messaging::{Configuration, Message, TransmitState},
+            results::{get_unix_timestamp, IntervalResultBox, UdpSendResult},
         },
-        stream::TestRunner,
+        stream::{TestRunner, INTERVAL},
         BoxResult,
     };
     use std::net::UdpSocket;
@@ -472,7 +437,7 @@ pub mod sender {
 
     pub struct UdpSender {
         active: bool,
-        test_definition: super::UdpTestDefinition,
+        cfg: Configuration,
         stream_idx: usize,
 
         socket: UdpSocket,
@@ -487,7 +452,7 @@ pub mod sender {
     impl UdpSender {
         #[allow(clippy::too_many_arguments, unused_variables)]
         pub fn new(
-            test_definition: super::UdpTestDefinition,
+            cfg: &Configuration,
             stream_idx: usize,
             port: u16,
             receiver_ip: IpAddr,
@@ -513,17 +478,17 @@ pub mod sender {
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
 
-            let mut staged_packet = vec![0_u8; test_definition.length.into()];
+            let mut staged_packet = vec![0_u8; cfg.length as usize];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) {
                 //fill the packet with a fixed sequence
                 staged_packet[i as usize] = (i % 256) as u8;
             }
             //embed the test ID
-            staged_packet[0..16].copy_from_slice(test_definition.test_id.as_bytes());
+            staged_packet[0..16].copy_from_slice(cfg.test_id.as_bytes());
 
             Ok(UdpSender {
                 active: true,
-                test_definition,
+                cfg: cfg.clone(),
                 stream_idx,
 
                 socket,
@@ -552,7 +517,7 @@ pub mod sender {
         fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
-            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
+            let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
             let mut bytes_to_send_remaining = bytes_to_send;
             let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
@@ -582,7 +547,7 @@ pub mod sender {
                         bytes_to_send_per_interval_slice_remaining -= bytes_written;
 
                         let elapsed_time = cycle_start.elapsed();
-                        if elapsed_time >= super::INTERVAL {
+                        if elapsed_time >= INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             log::debug!(
                                 "{} bytes sent via UDP stream {} in this interval; reporting...",
@@ -591,7 +556,7 @@ pub mod sender {
                             );
                             let send_result = TransmitState {
                                 family: Some("udp".to_string()),
-                                timestamp: super::get_unix_timestamp(),
+                                timestamp: get_unix_timestamp(),
                                 stream_idx: Some(self.stream_idx),
                                 duration: elapsed_time.as_secs_f32(),
                                 bytes_sent: Some(bytes_sent),
@@ -617,8 +582,8 @@ pub mod sender {
                 if bytes_to_send_remaining <= 0 {
                     //interval's target is exhausted, so sleep until the end
                     let elapsed_time = cycle_start.elapsed();
-                    if super::INTERVAL > elapsed_time {
-                        sleep(super::INTERVAL - elapsed_time);
+                    if INTERVAL > elapsed_time {
+                        sleep(INTERVAL - elapsed_time);
                     }
                 } else if bytes_to_send_per_interval_slice_remaining <= 0 {
                     // interval subsection exhausted
@@ -640,7 +605,7 @@ pub mod sender {
                 );
                 let send_result = TransmitState {
                     family: Some("udp".to_string()),
-                    timestamp: super::get_unix_timestamp(),
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
                     bytes_sent: Some(bytes_sent),

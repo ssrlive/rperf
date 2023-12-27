@@ -18,47 +18,10 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::messaging::Configuration;
-use crate::protocol::results::get_unix_timestamp;
-use crate::stream::{parse_port_spec, INTERVAL};
-use crate::{error_gen, BoxResult};
-
 pub const TEST_HEADER_SIZE: usize = 16;
 
 #[cfg(unix)]
 const KEEPALIVE_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
-
-#[derive(Clone)]
-pub struct TcpTestDefinition {
-    //a UUID used to identify packets associated with this test
-    pub test_id: uuid::Uuid,
-    //bandwidth target, in bytes/sec
-    pub bandwidth: u64,
-    //the length of the buffer to exchange
-    pub length: usize,
-    // whether to reverse the NAT
-    pub reverse_nat: bool,
-}
-
-impl TcpTestDefinition {
-    pub fn new(cfg: &Configuration) -> BoxResult<TcpTestDefinition> {
-        let length = cfg.length as usize;
-        if length < TEST_HEADER_SIZE {
-            let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
-            return Err(Box::new(error_gen!(err)));
-        }
-
-        let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
-        let reverse_nat = *cfg.reverse_nat.as_ref().unwrap_or(&false);
-
-        Ok(TcpTestDefinition {
-            test_id: cfg.test_id,
-            bandwidth,
-            length,
-            reverse_nat,
-        })
-    }
-}
 
 pub mod receiver {
     use mio::net::{TcpListener, TcpStream};
@@ -66,15 +29,18 @@ pub mod receiver {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::sync::Mutex;
+    use std::thread::sleep;
     use std::time::{Duration, Instant};
+
+    const BUFFER_FULL_TIMEOUT: Duration = Duration::from_millis(1);
 
     use crate::{
         error_gen,
         protocol::{
-            messaging::{Message, TransmitState},
-            results::{IntervalResultBox, TcpReceiveResult},
+            messaging::{Configuration, Message, TransmitState},
+            results::{get_unix_timestamp, IntervalResultBox, TcpReceiveResult, TcpSendResult},
         },
-        stream::TestRunner,
+        stream::{parse_port_spec, TestRunner, INTERVAL},
         BoxResult,
     };
 
@@ -98,14 +64,14 @@ pub mod receiver {
     }
     impl TcpPortPool {
         pub fn new(port_spec: &str, port_spec6: &str) -> TcpPortPool {
-            let ports = super::parse_port_spec(port_spec);
+            let ports = parse_port_spec(port_spec);
             if !ports.is_empty() {
                 log::debug!("configured IPv4 TCP port pool: {:?}", ports);
             } else {
                 log::debug!("using OS assignment for IPv4 TCP ports");
             }
 
-            let ports6 = super::parse_port_spec(port_spec6);
+            let ports6 = parse_port_spec(port_spec6);
             if !ports.is_empty() {
                 log::debug!("configured IPv6 TCP port pool: {:?}", ports6);
             } else {
@@ -191,7 +157,7 @@ pub mod receiver {
 
     pub struct TcpReceiver {
         active: AtomicBool,
-        test_definition: super::TcpTestDefinition,
+        cfg: Configuration,
         stream_idx: usize,
 
         listener: Option<TcpListener>,
@@ -200,15 +166,13 @@ pub mod receiver {
         mio_events: mio::Events,
         mio_poll: mio::Poll,
         mio_token: mio::Token,
+
+        remaining_duration: f32,
+        staged_buffer: Vec<u8>,
     }
 
     impl TcpReceiver {
-        pub fn new(
-            test_definition: super::TcpTestDefinition,
-            stream_idx: usize,
-            port_pool: &mut TcpPortPool,
-            peer_ip: IpAddr,
-        ) -> BoxResult<TcpReceiver> {
+        pub fn new(cfg: &Configuration, stream_idx: usize, port_pool: &mut TcpPortPool, peer_ip: IpAddr) -> BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let mut listener: TcpListener = port_pool.bind(peer_ip)?;
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
@@ -218,9 +182,17 @@ pub mod receiver {
             let mio_token = get_global_token();
             mio_poll.registry().register(&mut listener, mio_token, mio::Interest::READABLE)?;
 
+            let mut staged_buffer = vec![0_u8; cfg.length as usize];
+            for (i, staged_buffer_i) in staged_buffer.iter_mut().enumerate().skip(super::TEST_HEADER_SIZE) {
+                //fill the packet with a fixed sequence
+                *staged_buffer_i = (i % 256) as u8;
+            }
+            //embed the test ID
+            staged_buffer[0..16].copy_from_slice(cfg.test_id.as_bytes());
+
             Ok(TcpReceiver {
                 active: AtomicBool::new(true),
-                test_definition,
+                cfg: cfg.clone(),
                 stream_idx,
 
                 listener: Some(listener),
@@ -228,6 +200,9 @@ pub mod receiver {
                 mio_events,
                 mio_token,
                 mio_poll,
+
+                remaining_duration: *cfg.duration.as_ref().unwrap_or(&0.0),
+                staged_buffer,
             })
         }
 
@@ -285,7 +260,7 @@ pub mod receiver {
                 let mut unwrapped_stream = stream.unwrap();
 
                 // process the stream
-                let mut buf = vec![0_u8; self.test_definition.length];
+                let mut buf = vec![0_u8; self.cfg.length as usize];
                 let mut validated: bool = false;
                 let mut bytes_received: u64 = 0;
 
@@ -309,7 +284,7 @@ pub mod receiver {
                             };
 
                             if !validated {
-                                if uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.test_definition.test_id {
+                                if uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.cfg.test_id {
                                     log::debug!(
                                         "validated TCP stream {} connection from {}",
                                         self.stream_idx,
@@ -356,7 +331,7 @@ pub mod receiver {
             let stream = self.stream.as_mut().unwrap();
 
             let mio_token = self.mio_token;
-            let mut buf = vec![0_u8; self.test_definition.length];
+            let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let peer_addr = match stream.peer_addr() {
                 Ok(pa) => pa,
@@ -364,7 +339,7 @@ pub mod receiver {
             };
             let start = Instant::now();
 
-            while self.active.load(Relaxed) && start.elapsed() < super::INTERVAL {
+            while self.active.load(Relaxed) && start.elapsed() < INTERVAL {
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
                 self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
                 for event in self.mio_events.iter() {
@@ -409,7 +384,7 @@ pub mod receiver {
                     peer_addr
                 );
                 let receive_result = TransmitState {
-                    timestamp: super::get_unix_timestamp(),
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
                     bytes_received: Some(bytes_received),
@@ -430,80 +405,123 @@ pub mod receiver {
 
         fn process_stream_send(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> Option<BoxResult<IntervalResultBox>> {
             let stream = self.stream.as_mut().unwrap();
+
+            let interval_duration = Duration::from_secs_f32(self.cfg.send_interval.unwrap());
+            let mut interval_iteration = 0;
+            let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
+            let mut bytes_to_send_remaining = bytes_to_send;
+            let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.cfg.send_interval.unwrap()) as i64;
+            let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
+
+            let mut sends_blocked: u64 = 0;
+            let mut bytes_sent: u64 = 0;
+
             let peer_addr = match stream.peer_addr() {
                 Ok(pa) => pa,
                 Err(e) => return Some(Err(Box::new(e))),
             };
+            let cycle_start = Instant::now();
 
-            let mut bytes_received: u64 = _bytes_received;
-
-            let additional_time_elapsed: f32 = _additional_time_elapsed;
-
-            let mio_token = self.mio_token;
-            let mut buf = vec![0_u8; self.test_definition.length];
-
-            let start = Instant::now();
-
-            while self.active.load(Relaxed) && start.elapsed() < super::INTERVAL {
-                log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
-                self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
-                for event in self.mio_events.iter() {
-                    if event.token() == mio_token {
-                        loop {
-                            let packet_size = match stream.read(&mut buf) {
-                                Ok(packet_size) => packet_size,
-                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                                    // receive timeout
-                                    break;
-                                }
-                                Err(e) => {
-                                    return Some(Err(Box::new(e)));
-                                }
-                            };
-
-                            log::trace!(
-                                "received {} bytes in TCP stream {} from {}",
-                                packet_size,
-                                self.stream_idx,
-                                peer_addr
-                            );
-                            if packet_size == 0 {
-                                // test's over
-                                // HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
-                                self.active.store(false, Relaxed);
-                                break;
-                            }
-
-                            bytes_received += packet_size as u64;
-                        }
-                    } else {
-                        log::warn!("got event for unbound token: {:?}", event);
-                    }
-                }
-            }
-            if bytes_received > 0 {
-                log::debug!(
-                    "{} bytes received via TCP stream {} from {} in this interval; reporting...",
-                    bytes_received,
+            while self.active.load(Relaxed) && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
+                log::trace!(
+                    "writing {} bytes in TCP stream {} to {}...",
+                    self.staged_buffer.len(),
                     self.stream_idx,
                     peer_addr
                 );
-                let receive_result = TransmitState {
-                    timestamp: super::get_unix_timestamp(),
+                let packet_start = Instant::now();
+
+                use std::io::Write;
+                let packet_size = match stream.write(&self.staged_buffer) {
+                    // it doesn't matter if the whole thing couldn't be written, since it's just garbage data
+                    Ok(packet_size) => packet_size,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // send-buffer is full
+                        // nothing to do, but avoid burning CPU cycles
+                        sleep(BUFFER_FULL_TIMEOUT);
+                        sends_blocked += 1;
+                        continue;
+                    }
+                    Err(e) => {
+                        return Some(Err(Box::new(e)));
+                    }
+                };
+                log::trace!("wrote {} bytes in TCP stream {} to {}", packet_size, self.stream_idx, peer_addr);
+
+                let bytes_written = packet_size as i64;
+                bytes_sent += bytes_written as u64;
+                bytes_to_send_remaining -= bytes_written;
+                bytes_to_send_per_interval_slice_remaining -= bytes_written;
+
+                let elapsed_time = cycle_start.elapsed();
+                if elapsed_time >= INTERVAL {
+                    self.remaining_duration -= packet_start.elapsed().as_secs_f32();
+
+                    log::debug!(
+                        "{} bytes sent via TCP stream {} to {} in this interval; reporting...",
+                        bytes_sent,
+                        self.stream_idx,
+                        peer_addr
+                    );
+
+                    let send_result = TransmitState {
+                        timestamp: get_unix_timestamp(),
+                        stream_idx: Some(self.stream_idx),
+                        duration: elapsed_time.as_secs_f32(),
+                        bytes_sent: Some(bytes_sent),
+                        sends_blocked: Some(sends_blocked),
+                        family: Some("tcp".to_string()),
+                        ..TransmitState::default()
+                    };
+                    let send_result = Message::Send(send_result);
+                    return Some(Ok(Box::new(TcpSendResult::try_from(&send_result).unwrap())));
+                }
+
+                if bytes_to_send_remaining <= 0 {
+                    //interval's target is exhausted, so sleep until the end
+                    let elapsed_time = cycle_start.elapsed();
+                    if INTERVAL > elapsed_time {
+                        sleep(INTERVAL - elapsed_time);
+                    }
+                } else if bytes_to_send_per_interval_slice_remaining <= 0 {
+                    // interval subsection exhausted
+                    interval_iteration += 1;
+                    bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
+                    let elapsed_time = cycle_start.elapsed();
+                    let interval_endtime = interval_iteration * interval_duration;
+                    if interval_endtime > elapsed_time {
+                        sleep(interval_endtime - elapsed_time);
+                    }
+                }
+                self.remaining_duration -= packet_start.elapsed().as_secs_f32();
+            }
+            if bytes_sent > 0 {
+                log::debug!(
+                    "{} bytes sent via TCP stream {} to {} in this interval; reporting...",
+                    bytes_sent,
+                    self.stream_idx,
+                    peer_addr
+                );
+
+                let send_result = TransmitState {
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
-                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
-                    bytes_received: Some(bytes_received),
+                    duration: cycle_start.elapsed().as_secs_f32(),
+                    bytes_sent: Some(bytes_sent),
+                    sends_blocked: Some(sends_blocked),
                     family: Some("tcp".to_string()),
                     ..TransmitState::default()
                 };
-                let receive_result = Message::Receive(receive_result);
-                Some(Ok(Box::new(TcpReceiveResult::try_from(&receive_result).unwrap())))
+                let send_result = Message::Send(send_result);
+                Some(Ok(Box::new(TcpSendResult::try_from(&send_result).unwrap())))
             } else {
                 log::debug!(
-                    "no bytes received via TCP stream {} from {} in this interval",
+                    "no bytes sent via TCP stream {} to {} in this interval; shutting down...",
                     self.stream_idx,
                     peer_addr
                 );
+                // indicate that the test is over by dropping the stream
+                self.stream = None;
                 None
             }
         }
@@ -526,7 +544,7 @@ pub mod receiver {
                 bytes_received += bytes_received_in_validation;
                 additional_time_elapsed += time_spent_in_validation;
             }
-            if self.test_definition.reverse_nat {
+            if self.cfg.reverse_nat.unwrap_or(false) {
                 let res = self.process_stream_send(bytes_received, additional_time_elapsed)?;
                 Some(res)
             } else {
@@ -564,10 +582,10 @@ pub mod sender {
     use crate::{
         error_gen,
         protocol::{
-            messaging::{Message, TransmitState},
-            results::{IntervalResultBox, TcpSendResult},
+            messaging::{Configuration, Message, TransmitState},
+            results::{get_unix_timestamp, IntervalResultBox, TcpSendResult},
         },
-        stream::TestRunner,
+        stream::{TestRunner, INTERVAL},
         BoxResult,
     };
 
@@ -578,7 +596,7 @@ pub mod sender {
     #[allow(dead_code)]
     pub struct TcpSender {
         active: bool,
-        test_definition: super::TcpTestDefinition,
+        cfg: Configuration,
         stream_idx: usize,
 
         socket_addr: SocketAddr,
@@ -596,7 +614,7 @@ pub mod sender {
     impl TcpSender {
         #[allow(clippy::too_many_arguments)]
         pub fn new(
-            test_definition: super::TcpTestDefinition,
+            cfg: &Configuration,
             stream_idx: usize,
             receiver_ip: IpAddr,
             receiver_port: u16,
@@ -605,17 +623,17 @@ pub mod sender {
             send_buffer: usize,
             no_delay: bool,
         ) -> BoxResult<TcpSender> {
-            let mut staged_buffer = vec![0_u8; test_definition.length];
+            let mut staged_buffer = vec![0_u8; cfg.length as usize];
             for (i, staged_buffer_i) in staged_buffer.iter_mut().enumerate().skip(super::TEST_HEADER_SIZE) {
                 //fill the packet with a fixed sequence
                 *staged_buffer_i = (i % 256) as u8;
             }
             //embed the test ID
-            staged_buffer[0..16].copy_from_slice(test_definition.test_id.as_bytes());
+            staged_buffer[0..16].copy_from_slice(cfg.test_id.as_bytes());
 
             Ok(TcpSender {
                 active: true,
-                test_definition,
+                cfg: cfg.clone(),
                 stream_idx,
 
                 socket_addr: SocketAddr::new(receiver_ip, receiver_port),
@@ -673,7 +691,7 @@ pub mod sender {
 
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
-            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
+            let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
             let mut bytes_to_send_remaining = bytes_to_send;
             let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
@@ -718,7 +736,7 @@ pub mod sender {
                 bytes_to_send_per_interval_slice_remaining -= bytes_written;
 
                 let elapsed_time = cycle_start.elapsed();
-                if elapsed_time >= super::INTERVAL {
+                if elapsed_time >= INTERVAL {
                     self.remaining_duration -= packet_start.elapsed().as_secs_f32();
 
                     log::debug!(
@@ -729,7 +747,7 @@ pub mod sender {
                     );
 
                     let send_result = TransmitState {
-                        timestamp: super::get_unix_timestamp(),
+                        timestamp: get_unix_timestamp(),
                         stream_idx: Some(self.stream_idx),
                         duration: elapsed_time.as_secs_f32(),
                         bytes_sent: Some(bytes_sent),
@@ -744,8 +762,8 @@ pub mod sender {
                 if bytes_to_send_remaining <= 0 {
                     //interval's target is exhausted, so sleep until the end
                     let elapsed_time = cycle_start.elapsed();
-                    if super::INTERVAL > elapsed_time {
-                        sleep(super::INTERVAL - elapsed_time);
+                    if INTERVAL > elapsed_time {
+                        sleep(INTERVAL - elapsed_time);
                     }
                 } else if bytes_to_send_per_interval_slice_remaining <= 0 {
                     // interval subsection exhausted
@@ -768,7 +786,7 @@ pub mod sender {
                 );
 
                 let send_result = TransmitState {
-                    timestamp: super::get_unix_timestamp(),
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
                     bytes_sent: Some(bytes_sent),
