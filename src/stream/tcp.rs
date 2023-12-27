@@ -431,6 +431,7 @@ pub mod receiver {
 pub mod sender {
     use std::io::Write;
     use std::net::{IpAddr, SocketAddr, TcpStream};
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
@@ -450,7 +451,7 @@ pub mod sender {
 
     #[allow(dead_code)]
     pub struct TcpSender {
-        active: bool,
+        active: AtomicBool,
         cfg: Configuration,
         stream_idx: usize,
 
@@ -487,7 +488,7 @@ pub mod sender {
             staged_buffer[0..16].copy_from_slice(cfg.test_id.as_bytes());
 
             Ok(TcpSender {
-                active: true,
+                active: AtomicBool::new(true),
                 cfg: cfg.clone(),
                 stream_idx,
 
@@ -560,7 +561,7 @@ pub mod sender {
             };
             let cycle_start = Instant::now();
 
-            while self.active && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
+            while self.active.load(Relaxed) && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
                 log::trace!(
                     "writing {} bytes in TCP stream {} to {}...",
                     self.staged_buffer.len(),
@@ -693,7 +694,7 @@ pub mod sender {
         }
 
         fn stop(&mut self) {
-            self.active = false;
+            self.active.store(false, Relaxed);
         }
     }
 }
