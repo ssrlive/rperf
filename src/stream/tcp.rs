@@ -574,8 +574,9 @@ pub mod receiver {
 }
 
 pub mod sender {
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::net::{IpAddr, SocketAddr, TcpStream};
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
@@ -583,7 +584,7 @@ pub mod sender {
         error_gen,
         protocol::{
             messaging::{Configuration, Message, TransmitState},
-            results::{get_unix_timestamp, IntervalResultBox, TcpSendResult},
+            results::{get_unix_timestamp, IntervalResultBox, TcpReceiveResult, TcpSendResult},
         },
         stream::{TestRunner, INTERVAL},
         BoxResult,
@@ -592,10 +593,11 @@ pub mod sender {
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
     const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
     const BUFFER_FULL_TIMEOUT: Duration = Duration::from_millis(1);
+    const RECEIVE_TIMEOUT: Duration = Duration::from_secs(3);
 
     #[allow(dead_code)]
     pub struct TcpSender {
-        active: bool,
+        active: AtomicBool,
         cfg: Configuration,
         stream_idx: usize,
 
@@ -610,6 +612,8 @@ pub mod sender {
 
         send_buffer: usize,
         no_delay: bool,
+
+        test_id_sent: bool,
     }
     impl TcpSender {
         #[allow(clippy::too_many_arguments)]
@@ -632,7 +636,7 @@ pub mod sender {
             staged_buffer[0..16].copy_from_slice(cfg.test_id.as_bytes());
 
             Ok(TcpSender {
-                active: true,
+                active: AtomicBool::new(true),
                 cfg: cfg.clone(),
                 stream_idx,
 
@@ -646,6 +650,7 @@ pub mod sender {
 
                 send_buffer,
                 no_delay,
+                test_id_sent: false,
             })
         }
 
@@ -661,6 +666,7 @@ pub mod sender {
 
             stream.set_nonblocking(true)?;
             stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+            stream.set_read_timeout(Some(RECEIVE_TIMEOUT))?;
 
             // NOTE: features unsupported on Windows
             #[cfg(unix)]
@@ -705,7 +711,7 @@ pub mod sender {
             };
             let cycle_start = Instant::now();
 
-            while self.active && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
+            while self.active.load(Relaxed) && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
                 log::trace!(
                     "writing {} bytes in TCP stream {} to {}...",
                     self.staged_buffer.len(),
@@ -807,6 +813,115 @@ pub mod sender {
                 None
             }
         }
+
+        fn process_stream_receive(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> Option<BoxResult<IntervalResultBox>> {
+            let mut bytes_received: u64 = _bytes_received;
+
+            let additional_time_elapsed: f32 = _additional_time_elapsed;
+
+            let stream = self.stream.as_mut().unwrap();
+
+            let mut buf = vec![0_u8; self.cfg.length as usize];
+
+            let peer_addr = match stream.peer_addr() {
+                Ok(pa) => pa,
+                Err(e) => return Some(Err(Box::new(e))),
+            };
+            let start = Instant::now();
+
+            while self.active.load(Relaxed) && start.elapsed() < INTERVAL {
+                let packet_size = match stream.read(&mut buf) {
+                    Ok(packet_size) => packet_size,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                        // receive timeout
+                        sleep(WRITE_TIMEOUT);
+                        continue;
+                    }
+                    Err(e) => {
+                        return Some(Err(Box::new(e)));
+                    }
+                };
+
+                log::trace!(
+                    "received {} bytes in TCP stream {} from {}",
+                    packet_size,
+                    self.stream_idx,
+                    peer_addr
+                );
+                if packet_size == 0 {
+                    // test's over
+                    // HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
+                    self.active.store(false, Relaxed);
+                    break;
+                }
+
+                bytes_received += packet_size as u64;
+            }
+            if bytes_received > 0 {
+                log::debug!(
+                    "{} bytes received via TCP stream {} from {} in this interval; reporting...",
+                    bytes_received,
+                    self.stream_idx,
+                    peer_addr
+                );
+                let receive_result = TransmitState {
+                    timestamp: get_unix_timestamp(),
+                    stream_idx: Some(self.stream_idx),
+                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
+                    bytes_received: Some(bytes_received),
+                    family: Some("tcp".to_string()),
+                    ..TransmitState::default()
+                };
+                let receive_result = Message::Receive(receive_result);
+                Some(Ok(Box::new(TcpReceiveResult::try_from(&receive_result).unwrap())))
+            } else {
+                log::debug!(
+                    "no bytes received via TCP stream {} from {} in this interval",
+                    self.stream_idx,
+                    peer_addr
+                );
+                None
+            }
+        }
+
+        fn send_test_uuid(&mut self) -> BoxResult<()> {
+            if !self.test_id_sent {
+                let stream = self.stream.as_mut().ok_or(Box::new(error_gen!("no stream currently exists")))?;
+
+                let peer_addr = stream.peer_addr()?;
+
+                log::trace!(
+                    "sending TCP stream {} [{}] with test ID {}...",
+                    self.stream_idx,
+                    peer_addr,
+                    self.cfg.test_id,
+                );
+
+                let test_uuid = self.cfg.test_id.as_bytes();
+                let len = test_uuid.len();
+                let mut written = 0;
+                loop {
+                    // send the test ID
+                    let packet_size = match stream.write(&test_uuid[written..]) {
+                        Ok(packet_size) => packet_size,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                            // nothing to do, but avoid burning CPU cycles
+                            sleep(WRITE_TIMEOUT);
+                            continue;
+                        }
+                        Err(e) => {
+                            return Err(Box::new(e));
+                        }
+                    };
+                    written += packet_size;
+                    if written >= len {
+                        break;
+                    }
+                }
+                self.test_id_sent = true;
+            }
+            Ok(())
+        }
     }
 
     impl TestRunner for TcpSender {
@@ -822,7 +937,12 @@ pub mod sender {
                     }
                 }
             }
-            let res = self.process_stream_send()?;
+            let res = if self.cfg.reverse_nat.unwrap_or(false) {
+                self.send_test_uuid().ok()?;
+                self.process_stream_receive(0, 0.0)?
+            } else {
+                self.process_stream_send()?
+            };
             Some(res)
         }
 
@@ -838,7 +958,7 @@ pub mod sender {
         }
 
         fn stop(&mut self) {
-            self.active = false;
+            self.active.store(false, Relaxed);
         }
     }
 }

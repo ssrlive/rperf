@@ -264,8 +264,11 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 }
             } else {
                 // TCP
-                log::info!("preparing for TCP test with {} streams...", stream_count);
-
+                if args.reverse_nat {
+                    log::info!("preparing for TCP reverse-NAT test with {} streams...", stream_count);
+                } else {
+                    log::info!("preparing for TCP test with {} streams...", stream_count);
+                }
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                     let test = tcp::sender::TcpSender::new(

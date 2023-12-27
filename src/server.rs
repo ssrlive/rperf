@@ -75,7 +75,11 @@ fn handle_client(
             Message::Configuration(cfg) => {
                 //we either need to connect streams to the client or prepare to receive connections
                 if cfg.role == "download" {
-                    log::info!("[{}] running in forward-mode: server will be receiving data", &peer_addr);
+                    if cfg.reverse_nat.unwrap_or(false) {
+                        log::info!("[{}] running in reverse-NAT mode: server will be sending data", &peer_addr);
+                    } else {
+                        log::info!("[{}] running in forward-mode: server will be receiving data", &peer_addr);
+                    }
 
                     let stream_count = cfg.streams;
                     //since we're receiving data, we're also responsible for letting the client know where to send it
