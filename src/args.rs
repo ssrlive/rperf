@@ -45,11 +45,11 @@ pub struct Args {
     #[arg(short, long, value_name = "host", conflicts_with = "server")]
     pub client: Option<String>,
 
-    /// run in reverse-mode (server sends, client receives)
+    /// run in reverse-mode (server sends, client receives), server connect client actively
     #[arg(short = 'R', long, conflicts_with_all = ["server", "reverse_nat"])]
     pub reverse: bool,
 
-    /// run in reverse-mode (server sends, client receives), but through NAT
+    /// run in reverse-mode (server sends, client receives), client connect server actively and mayby through NAT
     #[arg(short = 'n', long, conflicts_with_all = ["server", "reverse"])]
     pub reverse_nat: bool,
 

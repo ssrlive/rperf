@@ -244,6 +244,7 @@ pub fn prepare_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> C
     let send_buffer = calc_buffer_length(args.send_buffer as u32, length);
     let receive_buffer = calc_buffer_length(args.receive_buffer as u32, length);
 
+    let reverse_nat = if args.reverse_nat { Some(true) } else { None };
     let role = if args.reverse { "upload" } else { "download" };
     let family = if args.udp { "udp" } else { "tcp" };
     let no_delay = if args.udp { None } else { Some(args.no_delay) };
@@ -252,6 +253,7 @@ pub fn prepare_configuration(args: &crate::args::Args, test_id: uuid::Uuid) -> C
     Configuration {
         family: Some(family.to_string()),
         role: role.to_string(),
+        reverse_nat,
         test_id,
         streams: validate_streams(parallel_streams),
         bandwidth: Some(validate_bandwidth(bandwidth)),
