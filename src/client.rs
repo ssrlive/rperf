@@ -194,11 +194,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             //UDP
             log::info!("preparing for reverse-UDP test with {} streams...", stream_count);
 
-            let test_definition = udp::UdpTestDefinition::new(&download_config)?;
             for stream_idx in 0..stream_count {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
-                    test_definition.clone(),
+                    &download_config,
                     stream_idx,
                     &mut udp_port_pool,
                     server_addr.ip(),
@@ -211,10 +210,9 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             //TCP
             log::info!("preparing for reverse-TCP test with {} streams...", stream_count);
 
-            let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
             for stream_idx in 0..stream_count {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
-                let test = tcp::receiver::TcpReceiver::new(test_definition.clone(), stream_idx, &mut tcp_port_pool, server_addr.ip())?;
+                let test = tcp::receiver::TcpReceiver::new(&download_config, stream_idx, &mut tcp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
@@ -246,11 +244,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 // UDP
                 log::info!("preparing for UDP test with {} streams...", stream_count);
 
-                let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing UDP-sender for stream {}...", stream_idx);
                     let test = udp::sender::UdpSender::new(
-                        test_definition.clone(),
+                        &upload_config,
                         stream_idx,
                         0,
                         server_addr.ip(),
@@ -265,11 +262,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 // TCP
                 log::info!("preparing for TCP test with {} streams...", stream_count);
 
-                let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                     let test = tcp::sender::TcpSender::new(
-                        test_definition.clone(),
+                        &upload_config,
                         stream_idx,
                         server_addr.ip(),
                         port,

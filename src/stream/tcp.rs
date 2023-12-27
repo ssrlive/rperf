@@ -18,42 +18,10 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::messaging::Configuration;
-use crate::protocol::results::get_unix_timestamp;
-use crate::stream::{parse_port_spec, INTERVAL};
-use crate::{error_gen, BoxResult};
-
 pub const TEST_HEADER_SIZE: usize = 16;
 
 #[cfg(unix)]
 const KEEPALIVE_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
-
-#[derive(Clone)]
-pub struct TcpTestDefinition {
-    //a UUID used to identify packets associated with this test
-    pub test_id: uuid::Uuid,
-    //bandwidth target, in bytes/sec
-    pub bandwidth: u64,
-    //the length of the buffer to exchange
-    pub length: usize,
-}
-impl TcpTestDefinition {
-    pub fn new(cfg: &Configuration) -> BoxResult<TcpTestDefinition> {
-        let length = cfg.length as usize;
-        if length < TEST_HEADER_SIZE {
-            let err = std::format!("{} is too short of a length to satisfy testing requirements", length);
-            return Err(Box::new(error_gen!(err)));
-        }
-
-        let bandwidth = *cfg.bandwidth.as_ref().unwrap_or(&0);
-
-        Ok(TcpTestDefinition {
-            test_id: cfg.test_id,
-            bandwidth,
-            length,
-        })
-    }
-}
 
 pub mod receiver {
     use mio::net::{TcpListener, TcpStream};
@@ -66,10 +34,10 @@ pub mod receiver {
     use crate::{
         error_gen,
         protocol::{
-            messaging::{Message, TransmitState},
-            results::{IntervalResultBox, TcpReceiveResult},
+            messaging::{Configuration, Message, TransmitState},
+            results::{get_unix_timestamp, IntervalResultBox, TcpReceiveResult},
         },
-        stream::TestRunner,
+        stream::{parse_port_spec, TestRunner, INTERVAL},
         BoxResult,
     };
 
@@ -93,14 +61,14 @@ pub mod receiver {
     }
     impl TcpPortPool {
         pub fn new(port_spec: &str, port_spec6: &str) -> TcpPortPool {
-            let ports = super::parse_port_spec(port_spec);
+            let ports = parse_port_spec(port_spec);
             if !ports.is_empty() {
                 log::debug!("configured IPv4 TCP port pool: {:?}", ports);
             } else {
                 log::debug!("using OS assignment for IPv4 TCP ports");
             }
 
-            let ports6 = super::parse_port_spec(port_spec6);
+            let ports6 = parse_port_spec(port_spec6);
             if !ports.is_empty() {
                 log::debug!("configured IPv6 TCP port pool: {:?}", ports6);
             } else {
@@ -186,7 +154,7 @@ pub mod receiver {
 
     pub struct TcpReceiver {
         active: AtomicBool,
-        test_definition: super::TcpTestDefinition,
+        cfg: Configuration,
         stream_idx: usize,
 
         listener: Option<TcpListener>,
@@ -198,12 +166,7 @@ pub mod receiver {
     }
 
     impl TcpReceiver {
-        pub fn new(
-            test_definition: super::TcpTestDefinition,
-            stream_idx: usize,
-            port_pool: &mut TcpPortPool,
-            peer_ip: IpAddr,
-        ) -> BoxResult<TcpReceiver> {
+        pub fn new(cfg: &Configuration, stream_idx: usize, port_pool: &mut TcpPortPool, peer_ip: IpAddr) -> BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let mut listener: TcpListener = port_pool.bind(peer_ip)?;
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
@@ -215,7 +178,7 @@ pub mod receiver {
 
             Ok(TcpReceiver {
                 active: AtomicBool::new(true),
-                test_definition,
+                cfg: cfg.clone(),
                 stream_idx,
 
                 listener: Some(listener),
@@ -280,7 +243,7 @@ pub mod receiver {
                 let mut unwrapped_stream = stream.unwrap();
 
                 // process the stream
-                let mut buf = vec![0_u8; self.test_definition.length];
+                let mut buf = vec![0_u8; self.cfg.length as usize];
                 let mut validated: bool = false;
                 let mut bytes_received: u64 = 0;
 
@@ -304,7 +267,7 @@ pub mod receiver {
                             };
 
                             if !validated {
-                                if uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.test_definition.test_id {
+                                if uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.cfg.test_id {
                                     log::debug!(
                                         "validated TCP stream {} connection from {}",
                                         self.stream_idx,
@@ -351,7 +314,7 @@ pub mod receiver {
             let stream = self.stream.as_mut().unwrap();
 
             let mio_token = self.mio_token;
-            let mut buf = vec![0_u8; self.test_definition.length];
+            let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let peer_addr = match stream.peer_addr() {
                 Ok(pa) => pa,
@@ -359,7 +322,7 @@ pub mod receiver {
             };
             let start = Instant::now();
 
-            while self.active.load(Relaxed) && start.elapsed() < super::INTERVAL {
+            while self.active.load(Relaxed) && start.elapsed() < INTERVAL {
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
                 self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
                 for event in self.mio_events.iter() {
@@ -404,7 +367,7 @@ pub mod receiver {
                     peer_addr
                 );
                 let receive_result = TransmitState {
-                    timestamp: super::get_unix_timestamp(),
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
                     bytes_received: Some(bytes_received),
@@ -474,10 +437,10 @@ pub mod sender {
     use crate::{
         error_gen,
         protocol::{
-            messaging::{Message, TransmitState},
-            results::{IntervalResultBox, TcpSendResult},
+            messaging::{Configuration, Message, TransmitState},
+            results::{get_unix_timestamp, IntervalResultBox, TcpSendResult},
         },
-        stream::TestRunner,
+        stream::{TestRunner, INTERVAL},
         BoxResult,
     };
 
@@ -488,7 +451,7 @@ pub mod sender {
     #[allow(dead_code)]
     pub struct TcpSender {
         active: bool,
-        test_definition: super::TcpTestDefinition,
+        cfg: Configuration,
         stream_idx: usize,
 
         socket_addr: SocketAddr,
@@ -506,7 +469,7 @@ pub mod sender {
     impl TcpSender {
         #[allow(clippy::too_many_arguments)]
         pub fn new(
-            test_definition: super::TcpTestDefinition,
+            cfg: &Configuration,
             stream_idx: usize,
             receiver_ip: IpAddr,
             receiver_port: u16,
@@ -515,17 +478,17 @@ pub mod sender {
             send_buffer: usize,
             no_delay: bool,
         ) -> BoxResult<TcpSender> {
-            let mut staged_buffer = vec![0_u8; test_definition.length];
+            let mut staged_buffer = vec![0_u8; cfg.length as usize];
             for (i, staged_buffer_i) in staged_buffer.iter_mut().enumerate().skip(super::TEST_HEADER_SIZE) {
                 //fill the packet with a fixed sequence
                 *staged_buffer_i = (i % 256) as u8;
             }
             //embed the test ID
-            staged_buffer[0..16].copy_from_slice(test_definition.test_id.as_bytes());
+            staged_buffer[0..16].copy_from_slice(cfg.test_id.as_bytes());
 
             Ok(TcpSender {
                 active: true,
-                test_definition,
+                cfg: cfg.clone(),
                 stream_idx,
 
                 socket_addr: SocketAddr::new(receiver_ip, receiver_port),
@@ -583,7 +546,7 @@ pub mod sender {
 
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
-            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
+            let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
             let mut bytes_to_send_remaining = bytes_to_send;
             let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
@@ -628,7 +591,7 @@ pub mod sender {
                 bytes_to_send_per_interval_slice_remaining -= bytes_written;
 
                 let elapsed_time = cycle_start.elapsed();
-                if elapsed_time >= super::INTERVAL {
+                if elapsed_time >= INTERVAL {
                     self.remaining_duration -= packet_start.elapsed().as_secs_f32();
 
                     log::debug!(
@@ -639,7 +602,7 @@ pub mod sender {
                     );
 
                     let send_result = TransmitState {
-                        timestamp: super::get_unix_timestamp(),
+                        timestamp: get_unix_timestamp(),
                         stream_idx: Some(self.stream_idx),
                         duration: elapsed_time.as_secs_f32(),
                         bytes_sent: Some(bytes_sent),
@@ -654,8 +617,8 @@ pub mod sender {
                 if bytes_to_send_remaining <= 0 {
                     //interval's target is exhausted, so sleep until the end
                     let elapsed_time = cycle_start.elapsed();
-                    if super::INTERVAL > elapsed_time {
-                        sleep(super::INTERVAL - elapsed_time);
+                    if INTERVAL > elapsed_time {
+                        sleep(INTERVAL - elapsed_time);
                     }
                 } else if bytes_to_send_per_interval_slice_remaining <= 0 {
                     // interval subsection exhausted
@@ -678,7 +641,7 @@ pub mod sender {
                 );
 
                 let send_result = TransmitState {
-                    timestamp: super::get_unix_timestamp(),
+                    timestamp: get_unix_timestamp(),
                     stream_idx: Some(self.stream_idx),
                     duration: cycle_start.elapsed().as_secs_f32(),
                     bytes_sent: Some(bytes_sent),

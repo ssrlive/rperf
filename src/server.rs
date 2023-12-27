@@ -86,11 +86,10 @@ fn handle_client(
 
                         let mut c_udp_port_pool = udp_port_pool.lock().unwrap();
 
-                        let test_definition = udp::UdpTestDefinition::new(cfg)?;
                         for stream_idx in 0..stream_count {
                             log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
                             let test = udp::receiver::UdpReceiver::new(
-                                test_definition.clone(),
+                                cfg,
                                 stream_idx,
                                 &mut c_udp_port_pool,
                                 peer_addr.ip(),
@@ -105,11 +104,9 @@ fn handle_client(
 
                         let mut c_tcp_port_pool = tcp_port_pool.lock().unwrap();
 
-                        let test_definition = tcp::TcpTestDefinition::new(cfg)?;
                         for stream_idx in 0..stream_count {
                             log::debug!("[{}] preparing TCP-receiver for stream {}...", &peer_addr, stream_idx);
-                            let test =
-                                tcp::receiver::TcpReceiver::new(test_definition.clone(), stream_idx, &mut c_tcp_port_pool, peer_addr.ip())?;
+                            let test = tcp::receiver::TcpReceiver::new(cfg, stream_idx, &mut c_tcp_port_pool, peer_addr.ip())?;
                             stream_ports.push(test.get_port()?);
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -127,11 +124,10 @@ fn handle_client(
                     if cfg.family.as_deref() == Some("udp") {
                         log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_ports.len());
 
-                        let test_definition = udp::UdpTestDefinition::new(cfg)?;
                         for (stream_idx, &port) in stream_ports.iter().enumerate() {
                             log::debug!("[{}] preparing UDP-sender for stream {}...", &peer_addr, stream_idx);
                             let test = udp::sender::UdpSender::new(
-                                test_definition.clone(),
+                                cfg,
                                 stream_idx,
                                 0,
                                 peer_addr.ip(),
@@ -146,11 +142,10 @@ fn handle_client(
                         //TCP
                         log::info!("[{}] preparing for TCP test with {} streams...", &peer_addr, stream_ports.len());
 
-                        let test_definition = tcp::TcpTestDefinition::new(cfg)?;
                         for (stream_idx, &port) in stream_ports.iter().enumerate() {
                             log::debug!("[{}] preparing TCP-sender for stream {}...", &peer_addr, stream_idx);
                             let test = tcp::sender::TcpSender::new(
-                                test_definition.clone(),
+                                cfg,
                                 stream_idx,
                                 peer_addr.ip(),
                                 port,
