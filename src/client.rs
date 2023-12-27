@@ -22,7 +22,7 @@ use crate::{
     args, error_gen,
     protocol::{
         communication::{receive_message, send_message},
-        messaging::{prepare_download_configuration, prepare_upload_configuration, Message},
+        messaging::{prepare_configuration, Message},
         results::{interval_result_from_message, ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
@@ -126,8 +126,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let is_udp = args.udp;
 
     let test_id = uuid::Uuid::new_v4();
-    let mut upload_config = prepare_upload_configuration(args, test_id)?;
-    let download_config = prepare_download_configuration(args, test_id)?;
+    let mut upload_config = prepare_configuration(args, test_id);
+    let download_config = upload_config.clone();
 
     //connect to the server
     let mut stream = connect_to_server(args.client.as_ref().unwrap(), args.port)?;
