@@ -49,7 +49,7 @@ pub struct Args {
     #[arg(short = 'R', long, conflicts_with_all = ["server", "reverse_nat"])]
     pub reverse: bool,
 
-    /// run in reverse-mode (server sends, client receives), client connect server actively and mayby through NAT
+    /// run in reverse-mode (server sends, client receives), client connect server actively and maybe through NAT
     #[arg(short = 'r', long, conflicts_with_all = ["server", "reverse"])]
     pub reverse_nat: bool,
 
