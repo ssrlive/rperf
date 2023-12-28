@@ -306,9 +306,8 @@ pub mod receiver {
             }
             true
         }
-    }
-    impl TestRunner for UdpReceiver {
-        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+
+        fn process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let mut bytes_received: u64 = 0;
@@ -401,6 +400,12 @@ pub mod receiver {
                 log::debug!("no bytes received via UDP stream {} in this interval", self.stream_idx);
                 Ok(None)
             }
+        }
+    }
+    impl TestRunner for UdpReceiver {
+        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+            let res = self.process_packet_receive()?;
+            Ok(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
@@ -512,9 +517,8 @@ pub mod sender {
             self.staged_packet[32..36].copy_from_slice(&now.subsec_nanos().to_be_bytes());
             Ok(())
         }
-    }
-    impl TestRunner for UdpSender {
-        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+
+        fn process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
             let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
@@ -641,6 +645,12 @@ pub mod sender {
                 }
                 Ok(None)
             }
+        }
+    }
+    impl TestRunner for UdpSender {
+        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+            let res = self.process_packet_send()?;
+            Ok(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
