@@ -28,7 +28,7 @@ pub mod receiver {
             messaging::{Configuration, Message, TransmitState},
             results::{get_unix_timestamp, IntervalResultBox, UdpReceiveResult},
         },
-        stream::{parse_port_spec, TestRunner, INTERVAL},
+        stream::{parse_port_spec, udp::sender::UdpSender, TestRunner, INTERVAL},
         BoxResult,
     };
     use chrono::NaiveDateTime;
@@ -156,13 +156,14 @@ pub mod receiver {
         previous_time_delta_nanoseconds: i64,
     }
 
+    #[derive(Default)]
     pub struct UdpReceiver {
         active: bool,
         cfg: Configuration,
         stream_idx: usize,
         next_packet_id: u64,
-
-        socket: UdpSocket,
+        socket: Option<UdpSocket>,
+        sender: Option<Box<UdpSender>>,
     }
     impl UdpReceiver {
         pub fn new(cfg: &Configuration, stream_idx: usize, port_pool: &mut UdpPortPool, peer_ip: IpAddr) -> BoxResult<UdpReceiver> {
@@ -185,11 +186,21 @@ pub mod receiver {
                 active: true,
                 cfg: cfg.clone(),
                 stream_idx,
-
                 next_packet_id: 0,
-
-                socket,
+                socket: Some(socket),
+                sender: None,
             })
+        }
+
+        pub(crate) fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> UdpReceiver {
+            UdpReceiver {
+                active: true,
+                cfg: cfg.clone(),
+                stream_idx,
+                next_packet_id: 0,
+                socket: Some(socket),
+                sender: None,
+            }
         }
 
         fn process_packets_ordering(&mut self, packet_id: u64, history: &mut UdpReceiverIntervalHistory) -> bool {
@@ -305,7 +316,7 @@ pub mod receiver {
             Ok(true)
         }
 
-        fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+        pub(crate) fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let mut bytes_received: u64 = 0;
@@ -315,7 +326,7 @@ pub mod receiver {
             let start = Instant::now();
 
             while self.active && start.elapsed() < INTERVAL {
-                let (packet_size, peer_addr) = match self.socket.recv_from(&mut buf) {
+                let (packet_size, peer_addr) = match self.socket.as_ref().unwrap().recv_from(&mut buf) {
                     Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
                         // receive timeout
@@ -387,15 +398,55 @@ pub mod receiver {
                 Ok(None)
             }
         }
+
+        fn get_incoming_socket_addr(&mut self) -> BoxResult<SocketAddr> {
+            let mut buf = vec![0_u8; self.cfg.length as usize];
+            let start = Instant::now();
+            while self.active && start.elapsed() < INTERVAL {
+                let (packet_size, peer_addr) = match self.socket.as_ref().unwrap().recv_from(&mut buf) {
+                    Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                        // receive timeout
+                        sleep(READ_TIMEOUT);
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                if packet_size > 16 && uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.cfg.test_id {
+                    return Ok(peer_addr);
+                }
+            }
+            let idx = self.stream_idx;
+            Err(Box::new(error_gen!("unable to retrieve incoming socket of stream {}", idx)))
+        }
+
+        fn interval_process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+            if self.sender.is_none() {
+                let incoming_addr = self.get_incoming_socket_addr()?;
+                let socket = self.socket.take().ok_or(Box::new(error_gen!("unable to get socket")))?;
+                socket.connect(incoming_addr)?;
+                let sender = UdpSender::new_from_udp_socket(&self.cfg, self.stream_idx, socket)?;
+                self.sender = Some(Box::new(sender));
+            }
+            let sender = self.sender.as_mut().unwrap();
+            let res = sender.interval_process_packet_send()?;
+            Ok(res)
+        }
     }
     impl TestRunner for UdpReceiver {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            let res = self.interval_process_packet_receive()?;
+            let res = if self.cfg.reverse_nat.unwrap_or(false) {
+                self.interval_process_packet_send()?
+            } else {
+                self.interval_process_packet_receive()?
+            };
             Ok(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
-            let socket_addr = self.socket.local_addr()?;
+            let socket_addr = self.socket.as_ref().unwrap().local_addr()?;
             Ok(socket_addr.port())
         }
 
@@ -411,11 +462,12 @@ pub mod receiver {
 
 pub mod sender {
     use crate::{
+        error_gen,
         protocol::{
             messaging::{Configuration, Message, TransmitState},
             results::{get_unix_timestamp, IntervalResultBox, UdpSendResult},
         },
-        stream::{TestRunner, INTERVAL},
+        stream::{udp::receiver::UdpReceiver, TestRunner, INTERVAL},
         BoxResult,
     };
     use std::net::UdpSocket;
@@ -426,12 +478,13 @@ pub mod sender {
     const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
     const BUFFER_FULL_TIMEOUT: Duration = Duration::from_millis(1);
 
+    #[derive(Default)]
     pub struct UdpSender {
         active: bool,
         cfg: Configuration,
         stream_idx: usize,
 
-        socket: UdpSocket,
+        socket: Option<UdpSocket>,
 
         //the interval, in seconds, at which to send data
         send_interval: f32,
@@ -439,6 +492,8 @@ pub mod sender {
         remaining_duration: f32,
         next_packet_id: u64,
         staged_packet: Vec<u8>,
+
+        receiver: Option<Box<UdpReceiver>>,
     }
     impl UdpSender {
         pub fn new(cfg: &Configuration, stream_idx: usize, port: u16, receiver_ip: IpAddr, receiver_port: u16) -> BoxResult<UdpSender> {
@@ -479,13 +534,14 @@ pub mod sender {
                 cfg: cfg.clone(),
                 stream_idx,
 
-                socket,
+                socket: Some(socket),
 
                 send_interval: cfg.send_interval.unwrap_or(0.0),
 
                 remaining_duration: cfg.duration.unwrap_or(0.0),
                 next_packet_id: 0,
                 staged_packet,
+                receiver: None,
             })
         }
 
@@ -501,7 +557,7 @@ pub mod sender {
             Ok(())
         }
 
-        fn interval_process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+        pub(crate) fn interval_process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
             let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
@@ -520,7 +576,7 @@ pub mod sender {
                 let packet_start = Instant::now();
 
                 self.prepare_packet()?;
-                let packet_size = match self.socket.send(&self.staged_packet) {
+                let packet_size = match self.socket.as_mut().unwrap().send(&self.staged_packet) {
                     Ok(packet_size) => packet_size,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         //send-buffer is full
@@ -611,7 +667,7 @@ pub mod sender {
                 let mut remaining_announcements = 5;
                 while remaining_announcements > 0 {
                     //do it a few times in case of loss
-                    match self.socket.send(&self.staged_packet[0..16]) {
+                    match self.socket.as_mut().unwrap().send(&self.staged_packet[0..16]) {
                         Ok(packet_size) => {
                             log::trace!("wrote {} bytes of test-end signal in UDP stream {}", packet_size, self.stream_idx);
                             remaining_announcements -= 1;
@@ -629,16 +685,63 @@ pub mod sender {
                 Ok(None)
             }
         }
+
+        fn send_initial_packet(&mut self) -> BoxResult<()> {
+            let mut written = 0;
+            loop {
+                let err = Box::new(error_gen!("could not get socket"));
+                let packet_size = match self.socket.as_ref().ok_or(err)?.send(&self.staged_packet[written..]) {
+                    Ok(packet_size) => packet_size,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        sleep(BUFFER_FULL_TIMEOUT);
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                written += packet_size;
+                if written > 16 {
+                    return Ok(());
+                }
+            }
+        }
+
+        fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+            if self.receiver.is_none() {
+                self.send_initial_packet()?;
+                let socket = self.socket.take().ok_or(Box::new(error_gen!("unable to get socket")))?;
+                let receiver = UdpReceiver::new_from_udp_socket(&self.cfg, self.stream_idx, socket);
+                self.receiver = Some(Box::new(receiver));
+            }
+            let receiver = self.receiver.as_mut().ok_or(Box::new(error_gen!("unable to get receiver")))?;
+            let res = receiver.interval_process_packet_receive()?;
+            Ok(res)
+        }
     }
     impl TestRunner for UdpSender {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            let res = self.interval_process_packet_send()?;
+            let res = if self.cfg.reverse_nat.unwrap_or(false) {
+                self.interval_process_packet_receive()?
+            } else {
+                self.interval_process_packet_send()?
+            };
             Ok(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
-            let socket_addr = self.socket.local_addr()?;
-            Ok(socket_addr.port())
+            // let socket_addr = self.socket.as_ref().unwrap().local_addr()?;
+            // Ok(socket_addr.port())
+
+            let port = self
+                .socket
+                .as_ref()
+                .map(|s| s.local_addr())
+                .and_then(Result::ok)
+                .map(|socket_addr| socket_addr.port())
+                .or_else(|| self.receiver.as_ref().map(|r| r.get_port())?.ok())
+                .ok_or_else(|| Box::new(error_gen!("unable to get port")))?;
+            Ok(port)
         }
 
         fn get_idx(&self) -> usize {

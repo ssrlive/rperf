@@ -239,7 +239,11 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             // we need to connect to the server
             if is_udp {
                 // UDP
-                log::info!("preparing for UDP test with {} streams...", stream_count);
+                if args.reverse_nat {
+                    log::info!("preparing for UDP reverse-NAT test with {} streams...", stream_count);
+                } else {
+                    log::info!("preparing for UDP test with {} streams...", stream_count);
+                }
 
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing UDP-sender for stream {}...", stream_idx);
