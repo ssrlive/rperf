@@ -120,16 +120,7 @@ fn handle_client(
 
                         for (stream_idx, &port) in stream_ports.iter().enumerate() {
                             log::debug!("[{}] preparing UDP-sender for stream {}...", &peer_addr, stream_idx);
-                            let test = udp::sender::UdpSender::new(
-                                cfg,
-                                stream_idx,
-                                0,
-                                peer_addr.ip(),
-                                port,
-                                *cfg.duration.as_ref().unwrap_or(&0.0),
-                                *cfg.send_interval.as_ref().unwrap_or(&1.0),
-                                *cfg.send_buffer.as_ref().unwrap_or(&0) as usize,
-                            )?;
+                            let test = udp::sender::UdpSender::new(cfg, stream_idx, 0, peer_addr.ip(), port)?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
                     } else {
@@ -138,16 +129,7 @@ fn handle_client(
 
                         for (stream_idx, &port) in stream_ports.iter().enumerate() {
                             log::debug!("[{}] preparing TCP-sender for stream {}...", &peer_addr, stream_idx);
-                            let test = tcp::sender::TcpSender::new(
-                                cfg,
-                                stream_idx,
-                                peer_addr.ip(),
-                                port,
-                                *cfg.duration.as_ref().unwrap_or(&0.0),
-                                *cfg.send_interval.as_ref().unwrap_or(&1.0),
-                                *cfg.send_buffer.as_ref().unwrap_or(&0) as usize,
-                                *cfg.no_delay.as_ref().unwrap_or(&false),
-                            )?;
+                            let test = tcp::sender::TcpSender::new(cfg, stream_idx, peer_addr.ip(), port)?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
                     }

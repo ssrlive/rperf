@@ -452,17 +452,7 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        #[allow(clippy::too_many_arguments, unused_variables)]
-        pub fn new(
-            cfg: &Configuration,
-            stream_idx: usize,
-            port: u16,
-            receiver_ip: IpAddr,
-            receiver_port: u16,
-            send_duration: f32,
-            send_interval: f32,
-            send_buffer: usize,
-        ) -> BoxResult<UdpSender> {
+        pub fn new(cfg: &Configuration, stream_idx: usize, port: u16, receiver_ip: IpAddr, receiver_port: u16) -> BoxResult<UdpSender> {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
             let socket_addr_receiver = SocketAddr::new(receiver_ip, receiver_port);
             let socket = match receiver_ip {
@@ -470,12 +460,15 @@ pub mod sender {
                 IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))?,
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
+
+            let _send_buffer: usize = cfg.send_buffer.unwrap_or(0) as usize;
+
             // NOTE: features unsupported on Windows
             #[cfg(unix)]
-            if send_buffer != 0 {
-                log::debug!("setting send-buffer to {}...", send_buffer);
+            if _send_buffer != 0 {
+                log::debug!("setting send-buffer to {}...", _send_buffer);
                 let raw_socket = socket2::SockRef::from(&socket);
-                raw_socket.set_send_buffer_size(send_buffer)?;
+                raw_socket.set_send_buffer_size(_send_buffer)?;
             }
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
@@ -495,9 +488,9 @@ pub mod sender {
 
                 socket,
 
-                send_interval,
+                send_interval: cfg.send_interval.unwrap_or(0.0),
 
-                remaining_duration: send_duration,
+                remaining_duration: cfg.duration.unwrap_or(0.0),
                 next_packet_id: 0,
                 staged_packet,
             })

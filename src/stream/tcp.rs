@@ -460,17 +460,7 @@ pub mod sender {
         no_delay: bool,
     }
     impl TcpSender {
-        #[allow(clippy::too_many_arguments)]
-        pub fn new(
-            cfg: &Configuration,
-            stream_idx: usize,
-            receiver_ip: IpAddr,
-            receiver_port: u16,
-            send_duration: f32,
-            send_interval: f32,
-            send_buffer: usize,
-            no_delay: bool,
-        ) -> BoxResult<TcpSender> {
+        pub fn new(cfg: &Configuration, stream_idx: usize, receiver_ip: IpAddr, receiver_port: u16) -> BoxResult<TcpSender> {
             let mut staged_buffer = vec![0_u8; cfg.length as usize];
             for (i, staged_buffer_i) in staged_buffer.iter_mut().enumerate().skip(super::TEST_HEADER_SIZE) {
                 //fill the packet with a fixed sequence
@@ -487,13 +477,13 @@ pub mod sender {
                 socket_addr: SocketAddr::new(receiver_ip, receiver_port),
                 stream: None,
 
-                send_interval,
+                send_interval: cfg.send_interval.unwrap_or(1.0),
 
-                remaining_duration: send_duration,
+                remaining_duration: cfg.duration.unwrap_or(0.0),
                 staged_buffer,
 
-                send_buffer,
-                no_delay,
+                send_buffer: cfg.send_buffer.unwrap_or(0) as usize,
+                no_delay: cfg.no_delay.unwrap_or(false),
             })
         }
 
