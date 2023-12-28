@@ -88,13 +88,7 @@ fn handle_client(
 
                         for stream_idx in 0..stream_count {
                             log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
-                            let test = udp::receiver::UdpReceiver::new(
-                                cfg,
-                                stream_idx,
-                                &mut c_udp_port_pool,
-                                peer_addr.ip(),
-                                cfg.receive_buffer.unwrap_or(0) as usize,
-                            )?;
+                            let test = udp::receiver::UdpReceiver::new(cfg, stream_idx, &mut c_udp_port_pool, peer_addr.ip())?;
                             stream_ports.push(test.get_port()?);
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }

@@ -165,22 +165,19 @@ pub mod receiver {
     }
     impl UdpReceiver {
         #[allow(unused_variables)]
-        pub fn new(
-            cfg: &Configuration,
-            stream_idx: usize,
-            port_pool: &mut UdpPortPool,
-            peer_ip: IpAddr,
-            receive_buffer: usize,
-        ) -> BoxResult<UdpReceiver> {
+        pub fn new(cfg: &Configuration, stream_idx: usize, port_pool: &mut UdpPortPool, peer_ip: IpAddr) -> BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip)?;
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
+
+            let _receive_buffer = cfg.receive_buffer.unwrap_or(0) as usize;
+
             // NOTE: features unsupported on Windows
             #[cfg(unix)]
-            if receive_buffer != 0 {
-                log::debug!("setting receive-buffer to {}...", receive_buffer);
+            if _receive_buffer != 0 {
+                log::debug!("setting receive-buffer to {}...", _receive_buffer);
                 let raw_socket = socket2::SockRef::from(&socket);
-                raw_socket.set_recv_buffer_size(receive_buffer)?;
+                raw_socket.set_recv_buffer_size(_receive_buffer)?;
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
@@ -307,7 +304,7 @@ pub mod receiver {
             true
         }
 
-        fn process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+        fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let mut bytes_received: u64 = 0;
@@ -404,7 +401,7 @@ pub mod receiver {
     }
     impl TestRunner for UdpReceiver {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            let res = self.process_packet_receive()?;
+            let res = self.interval_process_packet_receive()?;
             Ok(res)
         }
 
@@ -518,7 +515,7 @@ pub mod sender {
             Ok(())
         }
 
-        fn process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+        fn interval_process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
             let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
@@ -649,7 +646,7 @@ pub mod sender {
     }
     impl TestRunner for UdpSender {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            let res = self.process_packet_send()?;
+            let res = self.interval_process_packet_send()?;
             Ok(res)
         }
 

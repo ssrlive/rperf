@@ -196,13 +196,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
             for stream_idx in 0..stream_count {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
-                let test = udp::receiver::UdpReceiver::new(
-                    &download_config,
-                    stream_idx,
-                    &mut udp_port_pool,
-                    server_addr.ip(),
-                    *download_config.receive_buffer.as_ref().unwrap() as usize,
-                )?;
+                let test = udp::receiver::UdpReceiver::new(&download_config, stream_idx, &mut udp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
