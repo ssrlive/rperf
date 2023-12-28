@@ -126,15 +126,14 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let is_udp = args.udp;
 
     let test_id = uuid::Uuid::new_v4();
-    let mut upload_config = prepare_configuration(args, test_id);
-    let download_config = upload_config.clone();
+    let mut config = prepare_configuration(args, test_id);
 
     //connect to the server
     let mut stream = connect_to_server(args.client.as_ref().unwrap(), args.port)?;
     let server_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this test
-    let stream_count = download_config.streams as usize;
+    let stream_count = config.streams as usize;
     let mut parallel_streams: Vec<Arc<Mutex<(dyn TestRunner + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx) = channel::<IntervalResultBox>();
@@ -196,7 +195,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
             for stream_idx in 0..stream_count {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
-                let test = udp::receiver::UdpReceiver::new(&download_config, stream_idx, &mut udp_port_pool, server_addr.ip())?;
+                let test = udp::receiver::UdpReceiver::new(&config, stream_idx, &mut udp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
@@ -206,19 +205,19 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
             for stream_idx in 0..stream_count {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
-                let test = tcp::receiver::TcpReceiver::new(&download_config, stream_idx, &mut tcp_port_pool, server_addr.ip())?;
+                let test = tcp::receiver::TcpReceiver::new(&config, stream_idx, &mut tcp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
         }
 
         //add the port-list to the upload-config that the server will receive; this is in stream-index order
-        upload_config.stream_ports = Some(stream_ports);
+        config.stream_ports = Some(stream_ports);
 
-        let upload_config = Message::Configuration(upload_config.clone());
+        let config = Message::Configuration(config.clone());
 
         //let the server know what we're expecting
-        send_message(&mut stream, &upload_config)?;
+        send_message(&mut stream, &config)?;
     } else {
         if args.reverse_nat {
             log::debug!("running in reverse-NAT-mode: server will be senting data");
@@ -226,10 +225,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             log::debug!("running in forward-mode: server will be receiving data");
         }
 
-        let download_config = Message::Configuration(download_config.clone());
+        let config = Message::Configuration(config.clone());
 
         //let the server know to prepare for us to connect
-        send_message(&mut stream, &download_config)?;
+        send_message(&mut stream, &config)?;
         //NOTE: we don't prepare to send data at this point; that happens in the loop below, after the server signals that it's ready
     }
 
@@ -244,7 +243,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing UDP-sender for stream {}...", stream_idx);
-                    let test = udp::sender::UdpSender::new(&upload_config, stream_idx, 0, server_addr.ip(), port)?;
+                    let test = udp::sender::UdpSender::new(&config, stream_idx, 0, server_addr.ip(), port)?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
             } else {
@@ -256,7 +255,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 }
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing TCP-sender for stream {}...", stream_idx);
-                    let test = tcp::sender::TcpSender::new(&upload_config, stream_idx, server_addr.ip(), port)?;
+                    let test = tcp::sender::TcpSender::new(&config, stream_idx, server_addr.ip(), port)?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
             }
@@ -381,8 +380,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         }
     }
 
-    let mut upload_config = serde_json::to_value(Message::Configuration(upload_config))?;
-    let mut download_config = serde_json::to_value(Message::Configuration(download_config))?;
+    let mut upload_config = serde_json::to_value(Message::Configuration(config.clone()))?;
+    let mut download_config = serde_json::to_value(Message::Configuration(config))?;
 
     let common_config: serde_json::Value;
     //sanitise the config structures for export
