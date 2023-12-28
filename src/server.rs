@@ -92,13 +92,7 @@ fn handle_client(
 
                         for stream_idx in 0..stream_count {
                             log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
-                            let test = udp::receiver::UdpReceiver::new(
-                                cfg,
-                                stream_idx,
-                                &mut c_udp_port_pool,
-                                peer_addr.ip(),
-                                cfg.receive_buffer.unwrap_or(0) as usize,
-                            )?;
+                            let test = udp::receiver::UdpReceiver::new(cfg, stream_idx, &mut c_udp_port_pool, peer_addr.ip())?;
                             stream_ports.push(test.get_port()?);
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -241,20 +235,20 @@ fn test_run_interval(
         let stream_idx = test.get_idx();
         log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, stream_idx);
         let interval_result = match test.run_interval() {
-            Some(interval_result) => interval_result,
-            None => {
-                log::trace!("[{}] stream {} has finished", &peer_addr, stream_idx);
-                c_results_tx.send(Box::new(ServerDoneResult { stream_idx }))?;
+            Ok(interval_result) => interval_result,
+            Err(e) => {
+                log::error!("[{}] unable to process stream {}, error: {}", peer_addr, stream_idx, e);
+                c_results_tx.send(Box::new(ServerFailedResult { stream_idx }))?;
                 break;
             }
         };
         match interval_result {
-            Ok(ir) => {
+            Some(ir) => {
                 c_results_tx.send(ir)?;
             }
-            Err(e) => {
-                log::error!("[{}] unable to process stream: {}", peer_addr, e);
-                c_results_tx.send(Box::new(ServerFailedResult { stream_idx }))?;
+            None => {
+                log::trace!("[{}] stream {} has finished", &peer_addr, stream_idx);
+                c_results_tx.send(Box::new(ServerDoneResult { stream_idx }))?;
                 break;
             }
         }

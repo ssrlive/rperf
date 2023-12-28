@@ -30,7 +30,7 @@ pub const INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 /// INTERVAL while gathering data.
 pub trait TestRunner {
     /// gather data; returns None when the test is over
-    fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>>;
+    fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>>;
     /// return the port associated with the test-operation; this may vary over the test's lifetime
     fn get_port(&self) -> BoxResult<u16>;
     /// returns the index of the test, used to match client and server data
