@@ -244,16 +244,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing UDP-sender for stream {}...", stream_idx);
-                    let test = udp::sender::UdpSender::new(
-                        &upload_config,
-                        stream_idx,
-                        0,
-                        server_addr.ip(),
-                        port,
-                        *upload_config.duration.as_ref().unwrap_or(&0.0) as f32,
-                        *upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32,
-                        *upload_config.send_buffer.as_ref().unwrap_or(&0) as usize,
-                    )?;
+                    let test = udp::sender::UdpSender::new(&upload_config, stream_idx, 0, server_addr.ip(), port)?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
             } else {
@@ -265,16 +256,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 }
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
                     log::debug!("preparing TCP-sender for stream {}...", stream_idx);
-                    let test = tcp::sender::TcpSender::new(
-                        &upload_config,
-                        stream_idx,
-                        server_addr.ip(),
-                        port,
-                        *upload_config.duration.as_ref().unwrap_or(&0.0) as f32,
-                        *upload_config.send_interval.as_ref().unwrap_or(&0.0) as f32,
-                        *upload_config.send_buffer.as_ref().unwrap_or(&0) as usize,
-                        *upload_config.no_delay.as_ref().unwrap_or(&false),
-                    )?;
+                    let test = tcp::sender::TcpSender::new(&upload_config, stream_idx, server_addr.ip(), port)?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
             }
