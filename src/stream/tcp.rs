@@ -306,25 +306,22 @@ pub mod receiver {
             }
         }
 
-        fn process_stream_receive(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> Option<BoxResult<IntervalResultBox>> {
+        fn process_stream_receive(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> BoxResult<Option<IntervalResultBox>> {
             let mut bytes_received: u64 = _bytes_received;
 
             let additional_time_elapsed: f32 = _additional_time_elapsed;
 
-            let stream = self.stream.as_mut().unwrap();
+            let stream = self.stream.as_mut().ok_or(Box::new(error_gen!("no stream currently exists")))?;
 
             let mio_token = self.mio_token;
             let mut buf = vec![0_u8; self.cfg.length as usize];
 
-            let peer_addr = match stream.peer_addr() {
-                Ok(pa) => pa,
-                Err(e) => return Some(Err(Box::new(e))),
-            };
+            let peer_addr = stream.peer_addr()?;
             let start = Instant::now();
 
             while self.active.load(Relaxed) && start.elapsed() < INTERVAL {
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
-                self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
+                self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT))?;
                 for event in self.mio_events.iter() {
                     if event.token() == mio_token {
                         loop {
@@ -335,7 +332,7 @@ pub mod receiver {
                                     break;
                                 }
                                 Err(e) => {
-                                    return Some(Err(Box::new(e)));
+                                    return Err(Box::new(e));
                                 }
                             };
 
@@ -375,37 +372,32 @@ pub mod receiver {
                     ..TransmitState::default()
                 };
                 let receive_result = Message::Receive(receive_result);
-                Some(Ok(Box::new(TcpReceiveResult::try_from(&receive_result).unwrap())))
+                Ok(Some(Box::new(TcpReceiveResult::try_from(&receive_result)?)))
             } else {
                 log::debug!(
                     "no bytes received via TCP stream {} from {} in this interval",
                     self.stream_idx,
                     peer_addr
                 );
-                None
+                Ok(None)
             }
         }
     }
 
     impl TestRunner for TcpReceiver {
-        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let mut bytes_received = 0;
             let mut additional_time_elapsed = 0.0;
             if self.stream.is_none() {
                 // if still in the setup phase, receive the sender
-                let (stream, bytes_received_in_validation, time_spent_in_validation) = match self.process_connection() {
-                    Ok((s, b, t)) => (s, b, t),
-                    Err(e) => {
-                        return Some(Err(e));
-                    }
-                };
+                let (stream, bytes_received_in_validation, time_spent_in_validation) = self.process_connection()?;
                 self.stream = Some(stream);
                 // NOTE: the connection process consumes packets; account for those bytes
                 bytes_received += bytes_received_in_validation;
                 additional_time_elapsed += time_spent_in_validation;
             }
             let res = self.process_stream_receive(bytes_received, additional_time_elapsed)?;
-            Some(res)
+            Ok(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {
@@ -542,8 +534,8 @@ pub mod sender {
             Ok(stream)
         }
 
-        fn process_stream_send(&mut self) -> Option<BoxResult<IntervalResultBox>> {
-            let stream = self.stream.as_mut().unwrap();
+        fn process_stream_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
+            let stream = self.stream.as_mut().ok_or(Box::new(error_gen!("no stream currently exists")))?;
 
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
@@ -555,10 +547,7 @@ pub mod sender {
             let mut sends_blocked: u64 = 0;
             let mut bytes_sent: u64 = 0;
 
-            let peer_addr = match stream.peer_addr() {
-                Ok(pa) => pa,
-                Err(e) => return Some(Err(Box::new(e))),
-            };
+            let peer_addr = stream.peer_addr()?;
             let cycle_start = Instant::now();
 
             while self.active.load(Relaxed) && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
@@ -581,7 +570,7 @@ pub mod sender {
                         continue;
                     }
                     Err(e) => {
-                        return Some(Err(Box::new(e)));
+                        return Err(Box::new(e));
                     }
                 };
                 log::trace!("wrote {} bytes in TCP stream {} to {}", packet_size, self.stream_idx, peer_addr);
@@ -612,7 +601,7 @@ pub mod sender {
                         ..TransmitState::default()
                     };
                     let send_result = Message::Send(send_result);
-                    return Some(Ok(Box::new(TcpSendResult::try_from(&send_result).unwrap())));
+                    return Ok(Some(Box::new(TcpSendResult::try_from(&send_result)?)));
                 }
 
                 if bytes_to_send_remaining <= 0 {
@@ -651,7 +640,7 @@ pub mod sender {
                     ..TransmitState::default()
                 };
                 let send_result = Message::Send(send_result);
-                Some(Ok(Box::new(TcpSendResult::try_from(&send_result).unwrap())))
+                Ok(Some(Box::new(TcpSendResult::try_from(&send_result)?)))
             } else {
                 log::debug!(
                     "no bytes sent via TCP stream {} to {} in this interval; shutting down...",
@@ -660,26 +649,19 @@ pub mod sender {
                 );
                 //indicate that the test is over by dropping the stream
                 self.stream = None;
-                None
+                Ok(None)
             }
         }
     }
 
     impl TestRunner for TcpSender {
-        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             if self.stream.is_none() {
                 // if still in the setup phase, connect to the receiver
-                match self.process_connection() {
-                    Ok(stream) => {
-                        self.stream = Some(stream);
-                    }
-                    Err(e) => {
-                        return Some(Err(e));
-                    }
-                }
+                self.stream = Some(self.process_connection()?);
             }
             let res = self.process_stream_send()?;
-            Some(res)
+            Ok(res)
         }
 
         fn get_port(&self) -> BoxResult<u16> {

@@ -308,7 +308,7 @@ pub mod receiver {
         }
     }
     impl TestRunner for UdpReceiver {
-        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let mut buf = vec![0_u8; self.cfg.length as usize];
 
             let mut bytes_received: u64 = 0;
@@ -338,7 +338,7 @@ pub mod receiver {
                         continue;
                     }
                     Err(e) => {
-                        return Some(Err(Box::new(e)));
+                        return Err(Box::new(e));
                     }
                 };
 
@@ -350,7 +350,7 @@ pub mod receiver {
                 );
                 if packet_size == 16 {
                     // possible end-of-test message
-                    if uuid::Uuid::from_bytes((&buf[..16]).try_into().unwrap()) == self.cfg.test_id {
+                    if uuid::Uuid::from_bytes((&buf[..16]).try_into()?) == self.cfg.test_id {
                         // test's over
                         self.stop();
                         break;
@@ -396,10 +396,10 @@ pub mod receiver {
                     ..TransmitState::default()
                 };
                 let receive_result = Message::Receive(receive_result);
-                Some(Ok(Box::new(UdpReceiveResult::try_from(&receive_result).unwrap())))
+                Ok(Some(Box::new(UdpReceiveResult::try_from(&receive_result)?)))
             } else {
                 log::debug!("no bytes received via UDP stream {} in this interval", self.stream_idx);
-                None
+                Ok(None)
             }
         }
 
@@ -514,7 +514,7 @@ pub mod sender {
         }
     }
     impl TestRunner for UdpSender {
-        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
+        fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
             let bytes_to_send = ((self.cfg.bandwidth.unwrap() as f32) * INTERVAL.as_secs_f32()) as i64;
@@ -532,7 +532,7 @@ pub mod sender {
                 log::trace!("writing {} bytes in UDP stream {}...", self.staged_packet.len(), self.stream_idx);
                 let packet_start = Instant::now();
 
-                self.prepare_packet().ok()?;
+                self.prepare_packet()?;
                 match self.socket.send(&self.staged_packet) {
                     Ok(packet_size) => {
                         log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);
@@ -565,7 +565,7 @@ pub mod sender {
                                 ..TransmitState::default()
                             };
                             let send_result = Message::Send(send_result);
-                            return Some(Ok(Box::new(UdpSendResult::try_from(send_result).unwrap())));
+                            return Ok(Some(Box::new(UdpSendResult::try_from(send_result)?)));
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -575,7 +575,7 @@ pub mod sender {
                         sends_blocked += 1;
                     }
                     Err(e) => {
-                        return Some(Err(Box::new(e)));
+                        return Err(Box::new(e));
                     }
                 }
 
@@ -614,7 +614,7 @@ pub mod sender {
                     ..TransmitState::default()
                 };
                 let send_result = Message::Send(send_result);
-                Some(Ok(Box::new(UdpSendResult::try_from(&send_result).unwrap())))
+                Ok(Some(Box::new(UdpSendResult::try_from(&send_result)?)))
             } else {
                 log::debug!(
                     "no bytes sent via UDP stream {} in this interval; shutting down...",
@@ -635,11 +635,11 @@ pub mod sender {
                             sleep(BUFFER_FULL_TIMEOUT);
                         }
                         Err(e) => {
-                            return Some(Err(Box::new(e)));
+                            return Err(Box::new(e));
                         }
                     }
                 }
-                None
+                Ok(None)
             }
         }
 

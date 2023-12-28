@@ -479,20 +479,20 @@ fn client_test_run_interval(
         log::debug!("beginning test-interval for stream {}", stream_idx);
 
         let interval_result = match test.run_interval() {
-            Some(interval_result) => interval_result,
-            None => {
-                c_results_tx.send(Box::new(ClientDoneResult { stream_idx }))?;
+            Ok(interval_result) => interval_result,
+            Err(e) => {
+                log::error!("unable to process stream {}, error: {}", stream_idx, e);
+                c_results_tx.send(Box::new(ClientFailedResult { stream_idx }))?;
                 break;
             }
         };
 
         match interval_result {
-            Ok(ir) => {
+            Some(ir) => {
                 c_results_tx.send(ir)?;
             }
-            Err(e) => {
-                log::error!("unable to process stream: {}", e);
-                c_results_tx.send(Box::new(ClientFailedResult { stream_idx }))?;
+            None => {
+                c_results_tx.send(Box::new(ClientDoneResult { stream_idx }))?;
                 break;
             }
         }

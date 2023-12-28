@@ -237,20 +237,20 @@ fn test_run_interval(
         let stream_idx = test.get_idx();
         log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, stream_idx);
         let interval_result = match test.run_interval() {
-            Some(interval_result) => interval_result,
-            None => {
-                log::trace!("[{}] stream {} has finished", &peer_addr, stream_idx);
-                c_results_tx.send(Box::new(ServerDoneResult { stream_idx }))?;
+            Ok(interval_result) => interval_result,
+            Err(e) => {
+                log::error!("[{}] unable to process stream {}, error: {}", peer_addr, stream_idx, e);
+                c_results_tx.send(Box::new(ServerFailedResult { stream_idx }))?;
                 break;
             }
         };
         match interval_result {
-            Ok(ir) => {
+            Some(ir) => {
                 c_results_tx.send(ir)?;
             }
-            Err(e) => {
-                log::error!("[{}] unable to process stream: {}", peer_addr, e);
-                c_results_tx.send(Box::new(ServerFailedResult { stream_idx }))?;
+            None => {
+                log::trace!("[{}] stream {} has finished", &peer_addr, stream_idx);
+                c_results_tx.send(Box::new(ServerDoneResult { stream_idx }))?;
                 break;
             }
         }
