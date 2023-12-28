@@ -32,10 +32,10 @@ pub mod receiver {
         BoxResult,
     };
     use chrono::NaiveDateTime;
-    use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
     use std::sync::Mutex;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::{convert::TryInto, thread::sleep};
 
     const READ_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -141,6 +141,7 @@ pub mod receiver {
         }
     }
 
+    #[derive(Default)]
     struct UdpReceiverIntervalHistory {
         packets_received: u64,
 
@@ -164,7 +165,6 @@ pub mod receiver {
         socket: UdpSocket,
     }
     impl UdpReceiver {
-        #[allow(unused_variables)]
         pub fn new(cfg: &Configuration, stream_idx: usize, port_pool: &mut UdpPortPool, peer_ip: IpAddr) -> BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip)?;
@@ -238,8 +238,8 @@ pub mod receiver {
              * will remain effectively constant during the testing window
              */
             let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
-            let current_timestamp = NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos())
-                .ok_or(Box::new(error_gen!("unable to convert current timestamp to NaiveDateTime")))?;
+            let err = Box::new(error_gen!("unable to convert current timestamp to NaiveDateTime"));
+            let current_timestamp = NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos()).ok_or(err)?;
 
             let time_delta = current_timestamp - *timestamp;
 
@@ -271,27 +271,28 @@ pub mod receiver {
             Ok(())
         }
 
-        fn process_packet(&mut self, packet: &[u8], history: &mut UdpReceiverIntervalHistory) -> bool {
+        fn process_packet(&mut self, packet: &[u8], history: &mut UdpReceiverIntervalHistory) -> BoxResult<bool> {
             //the first sixteen bytes are the test's ID
-            if uuid::Uuid::from_bytes((&packet[..16]).try_into().unwrap()) != self.cfg.test_id {
-                return false;
+            if uuid::Uuid::from_bytes((&packet[..16]).try_into()?) != self.cfg.test_id {
+                return Ok(false);
             }
 
             //the next eight bytes are the packet's ID, in big-endian order
-            let packet_id = u64::from_be_bytes(packet[16..24].try_into().unwrap());
+            let packet_id = u64::from_be_bytes(packet[16..24].try_into()?);
 
             //except for the timestamp, nothing else in the packet actually matters
 
             history.packets_received += 1;
             if self.process_packets_ordering(packet_id, history) {
                 //the second eight are the number of seconds since the UNIX epoch, in big-endian order
-                let origin_seconds = i64::from_be_bytes(packet[24..32].try_into().unwrap());
+                let origin_seconds = i64::from_be_bytes(packet[24..32].try_into()?);
                 //and the following four are the number of nanoseconds since the UNIX epoch
-                let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into().unwrap());
-                let source_timestamp = NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).unwrap();
+                let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into()?);
+                let err = Box::new(error_gen!("unable to convert packet timestamp to NaiveDateTime"));
+                let source_timestamp = NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).ok_or(err)?;
 
                 history.unbroken_sequence += 1;
-                self.process_jitter(&source_timestamp, history).unwrap();
+                self.process_jitter(&source_timestamp, history)?;
 
                 if history.unbroken_sequence > history.longest_unbroken_sequence {
                     history.longest_unbroken_sequence = history.unbroken_sequence;
@@ -301,7 +302,7 @@ pub mod receiver {
                 history.unbroken_sequence = 0;
                 history.jitter_seconds = None;
             }
-            true
+            Ok(true)
         }
 
         fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
@@ -309,28 +310,16 @@ pub mod receiver {
 
             let mut bytes_received: u64 = 0;
 
-            let mut history = UdpReceiverIntervalHistory {
-                packets_received: 0,
-
-                packets_lost: 0,
-                packets_out_of_order: 0,
-                packets_duplicated: 0,
-
-                unbroken_sequence: 0,
-                jitter_seconds: None,
-                longest_unbroken_sequence: 0,
-                longest_jitter_seconds: None,
-                previous_time_delta_nanoseconds: 0,
-            };
+            let mut history = UdpReceiverIntervalHistory::default();
 
             let start = Instant::now();
 
             while self.active && start.elapsed() < INTERVAL {
-                log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
                 let (packet_size, peer_addr) = match self.socket.recv_from(&mut buf) {
                     Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
                         // receive timeout
+                        sleep(READ_TIMEOUT);
                         continue;
                     }
                     Err(e) => {
@@ -362,7 +351,7 @@ pub mod receiver {
                     continue;
                 }
 
-                if self.process_packet(&buf, &mut history) {
+                if self.process_packet(&buf[..packet_size], &mut history)? {
                     // NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
                     bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
                 } else {
@@ -473,6 +462,10 @@ pub mod sender {
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
 
+            Self::new_from_udp_socket(cfg, stream_idx, socket)
+        }
+
+        pub fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> BoxResult<UdpSender> {
             let mut staged_packet = vec![0_u8; cfg.length as usize];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) {
                 //fill the packet with a fixed sequence
@@ -527,50 +520,50 @@ pub mod sender {
                 let packet_start = Instant::now();
 
                 self.prepare_packet()?;
-                match self.socket.send(&self.staged_packet) {
-                    Ok(packet_size) => {
-                        log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);
-
-                        packets_sent += 1;
-                        //reflect that a packet is in-flight
-                        self.next_packet_id += 1;
-
-                        let bytes_written = packet_size as i64 + super::UDP_HEADER_SIZE as i64;
-                        bytes_sent += bytes_written as u64;
-                        bytes_to_send_remaining -= bytes_written;
-                        bytes_to_send_per_interval_slice_remaining -= bytes_written;
-
-                        let elapsed_time = cycle_start.elapsed();
-                        if elapsed_time >= INTERVAL {
-                            self.remaining_duration -= packet_start.elapsed().as_secs_f32();
-                            log::debug!(
-                                "{} bytes sent via UDP stream {} in this interval; reporting...",
-                                bytes_sent,
-                                self.stream_idx
-                            );
-                            let send_result = TransmitState {
-                                family: Some("udp".to_string()),
-                                timestamp: get_unix_timestamp(),
-                                stream_idx: Some(self.stream_idx),
-                                duration: elapsed_time.as_secs_f32(),
-                                bytes_sent: Some(bytes_sent),
-                                packets_sent: Some(packets_sent),
-                                sends_blocked: Some(sends_blocked),
-                                ..TransmitState::default()
-                            };
-                            let send_result = Message::Send(send_result);
-                            return Ok(Some(Box::new(UdpSendResult::try_from(send_result)?)));
-                        }
-                    }
+                let packet_size = match self.socket.send(&self.staged_packet) {
+                    Ok(packet_size) => packet_size,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         //send-buffer is full
                         //nothing to do, but avoid burning CPU cycles
                         sleep(BUFFER_FULL_TIMEOUT);
                         sends_blocked += 1;
+                        continue;
                     }
                     Err(e) => {
                         return Err(Box::new(e));
                     }
+                };
+                log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);
+
+                packets_sent += 1;
+                //reflect that a packet is in-flight
+                self.next_packet_id += 1;
+
+                let bytes_written = packet_size as i64 + super::UDP_HEADER_SIZE as i64;
+                bytes_sent += bytes_written as u64;
+                bytes_to_send_remaining -= bytes_written;
+                bytes_to_send_per_interval_slice_remaining -= bytes_written;
+
+                let elapsed_time = cycle_start.elapsed();
+                if elapsed_time >= INTERVAL {
+                    self.remaining_duration -= packet_start.elapsed().as_secs_f32();
+                    log::debug!(
+                        "{} bytes sent via UDP stream {} in this interval; reporting...",
+                        bytes_sent,
+                        self.stream_idx
+                    );
+                    let send_result = TransmitState {
+                        family: Some("udp".to_string()),
+                        timestamp: get_unix_timestamp(),
+                        stream_idx: Some(self.stream_idx),
+                        duration: elapsed_time.as_secs_f32(),
+                        bytes_sent: Some(bytes_sent),
+                        packets_sent: Some(packets_sent),
+                        sends_blocked: Some(sends_blocked),
+                        ..TransmitState::default()
+                    };
+                    let send_result = Message::Send(send_result);
+                    return Ok(Some(Box::new(UdpSendResult::try_from(send_result)?)));
                 }
 
                 if bytes_to_send_remaining <= 0 {
