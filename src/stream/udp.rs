@@ -191,14 +191,15 @@ pub mod receiver {
             })
         }
 
-        pub(crate) fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> UdpReceiver {
-            UdpReceiver {
+        pub(crate) fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> BoxResult<UdpReceiver> {
+            socket.set_read_timeout(Some(READ_TIMEOUT))?;
+            Ok(UdpReceiver {
                 active: true,
                 cfg: cfg.clone(),
                 stream_idx,
                 socket: Some(socket),
                 ..UdpReceiver::default()
-            }
+            })
         }
 
         fn process_packets_ordering(&mut self, packet_id: u64, history: &mut UdpReceiverIntervalHistory) -> bool {
@@ -716,7 +717,7 @@ pub mod sender {
                 self.send_initial_packet()?;
                 // remove the ownership of the socket from the sender and give it to the receiver
                 let socket = self.socket.take().ok_or(Box::new(error_gen!("unable to get socket")))?;
-                let receiver = UdpReceiver::new_from_udp_socket(&self.cfg, self.stream_idx, socket);
+                let receiver = UdpReceiver::new_from_udp_socket(&self.cfg, self.stream_idx, socket)?;
                 self.receiver = Some(Box::new(receiver));
             }
             let receiver = self.receiver.as_mut().ok_or(Box::new(error_gen!("unable to get receiver")))?;
