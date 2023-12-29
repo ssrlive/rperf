@@ -446,8 +446,11 @@ pub mod receiver {
         }
 
         fn get_port(&self) -> BoxResult<u16> {
-            let socket_addr = self.socket.as_ref().unwrap().local_addr()?;
-            Ok(socket_addr.port())
+            match (&self.socket, &self.sender) {
+                (Some(s), _) => Ok(s.local_addr()?.port()),
+                (_, Some(r)) => r.get_port(),
+                _ => Err(Box::new(error_gen!("unable to get port"))),
+            }
         }
 
         fn get_idx(&self) -> usize {
@@ -730,18 +733,11 @@ pub mod sender {
         }
 
         fn get_port(&self) -> BoxResult<u16> {
-            // let socket_addr = self.socket.as_ref().unwrap().local_addr()?;
-            // Ok(socket_addr.port())
-
-            let port = self
-                .socket
-                .as_ref()
-                .map(|s| s.local_addr())
-                .and_then(Result::ok)
-                .map(|socket_addr| socket_addr.port())
-                .or_else(|| self.receiver.as_ref().map(|r| r.get_port())?.ok())
-                .ok_or_else(|| Box::new(error_gen!("unable to get port")))?;
-            Ok(port)
+            match (&self.socket, &self.receiver) {
+                (Some(s), _) => Ok(s.local_addr()?.port()),
+                (_, Some(r)) => r.get_port(),
+                _ => Err(Box::new(error_gen!("unable to get port"))),
+            }
         }
 
         fn get_idx(&self) -> usize {

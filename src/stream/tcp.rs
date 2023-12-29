@@ -434,12 +434,11 @@ pub mod receiver {
         }
 
         fn get_port(&self) -> BoxResult<u16> {
-            match &self.listener {
-                Some(listener) => Ok(listener.local_addr()?.port()),
-                None => match &self.stream {
-                    Some(stream) => Ok(stream.local_addr()?.port()),
-                    None => Err(Box::new(error_gen!("no port currently bound"))),
-                },
+            match (&self.listener, &self.stream, &self.sender) {
+                (Some(listener), _, _) => Ok(listener.local_addr()?.port()),
+                (_, Some(stream), _) => Ok(stream.local_addr()?.port()),
+                (_, _, Some(sender)) => Ok(sender.get_port()?),
+                _ => Err(Box::new(error_gen!("no port currently bound"))),
             }
         }
 
