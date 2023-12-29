@@ -418,19 +418,19 @@ pub mod receiver {
                 bytes_received += bytes_received_in_validation;
                 additional_time_elapsed += time_spent_in_validation;
             }
-            let res = if self.cfg.reverse_nat.unwrap_or(false) {
+            if self.cfg.reverse_nat.unwrap_or(false) {
                 if self.sender.is_none() {
+                    // remove the ownership of the stream from the receiver and give it to the sender
                     let stream = self.stream.take().ok_or(Box::new(error_gen!("no stream currently exists")))?;
                     let stream = super::mio_stream_to_std_stream(stream);
                     let sender = TcpSender::new_from_tcp_stream(&self.cfg, self.stream_idx, stream)?;
                     self.sender = Some(Box::new(sender));
                 }
                 let sender = self.sender.as_mut().ok_or(Box::new(error_gen!("no sender currently exists")))?;
-                sender.process_stream_send()?
+                sender.process_stream_send()
             } else {
-                self.process_stream_receive(bytes_received, additional_time_elapsed)?
-            };
-            Ok(res)
+                self.process_stream_receive(bytes_received, additional_time_elapsed)
+            }
         }
 
         fn get_port(&self) -> BoxResult<u16> {
@@ -448,6 +448,9 @@ pub mod receiver {
 
         fn stop(&mut self) {
             self.active.store(false, Relaxed);
+            if let Some(s) = self.sender.as_mut() {
+                s.stop();
+            }
         }
     }
 }
@@ -474,13 +477,13 @@ pub mod sender {
     const BUFFER_FULL_TIMEOUT: Duration = Duration::from_millis(1);
     const RECEIVE_TIMEOUT: Duration = Duration::from_secs(3);
 
-    #[allow(dead_code)]
+    #[derive(Default)]
     pub struct TcpSender {
         active: AtomicBool,
         cfg: Configuration,
         stream_idx: usize,
 
-        socket_addr: SocketAddr,
+        socket_addr: Option<SocketAddr>,
         stream: Option<TcpStream>,
 
         //the interval, in seconds, at which to send data
@@ -501,19 +504,12 @@ pub mod sender {
                 active: AtomicBool::new(true),
                 cfg: cfg.clone(),
                 stream_idx,
-
-                socket_addr: SocketAddr::new(receiver_ip, receiver_port),
-                stream: None,
-
+                socket_addr: Some(SocketAddr::new(receiver_ip, receiver_port)),
                 send_interval: cfg.send_interval.unwrap_or(1.0),
-
                 remaining_duration: cfg.duration.unwrap_or(0.0),
                 staged_buffer: Self::build_staged_buffer(cfg.length as usize, cfg.test_id),
-
                 no_delay: cfg.no_delay.unwrap_or(false),
-                test_id_sent: false,
-
-                receiver: None,
+                ..TcpSender::default()
             })
         }
 
@@ -522,14 +518,13 @@ pub mod sender {
                 active: AtomicBool::new(true),
                 cfg: cfg.clone(),
                 stream_idx,
-                socket_addr: stream.peer_addr()?,
+                socket_addr: Some(stream.peer_addr()?),
                 stream: Some(stream),
                 send_interval: cfg.send_interval.unwrap_or(1.0),
                 remaining_duration: cfg.duration.unwrap_or(0.0),
                 staged_buffer: Self::build_staged_buffer(cfg.length as usize, cfg.test_id),
                 no_delay: cfg.no_delay.unwrap_or(false),
-                test_id_sent: false,
-                receiver: None,
+                ..TcpSender::default()
             })
         }
 
@@ -545,9 +540,10 @@ pub mod sender {
         }
 
         fn process_connection(&mut self) -> BoxResult<TcpStream> {
-            log::debug!("preparing to connect TCP stream {} to {} ...", self.stream_idx, self.socket_addr);
+            let socket_addr = self.socket_addr.ok_or(Box::new(error_gen!("no socket address currently exists")))?;
+            log::debug!("preparing to connect TCP stream {} to {} ...", self.stream_idx, socket_addr);
 
-            let stream = match TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
+            let stream = match TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT) {
                 Ok(s) => s,
                 Err(e) => {
                     return Err(Box::new(error_gen!("unable to connect stream {}: {}", self.stream_idx, e)));
@@ -817,13 +813,12 @@ pub mod sender {
                 // if still in the setup phase, connect to the receiver
                 self.stream = Some(self.process_connection()?);
             }
-            let res = if self.cfg.reverse_nat.unwrap_or(false) {
+            if self.cfg.reverse_nat.unwrap_or(false) {
                 self.send_test_uuid()?;
-                self.process_stream_receive(0, 0.0)?
+                self.process_stream_receive(0, 0.0)
             } else {
-                self.process_stream_send()?
-            };
-            Ok(res)
+                self.process_stream_send()
+            }
         }
 
         fn get_port(&self) -> BoxResult<u16> {
@@ -839,6 +834,9 @@ pub mod sender {
 
         fn stop(&mut self) {
             self.active.store(false, Relaxed);
+            if let Some(r) = self.receiver.as_mut() {
+                r.stop();
+            }
         }
     }
 }

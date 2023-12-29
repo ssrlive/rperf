@@ -186,9 +186,8 @@ pub mod receiver {
                 active: true,
                 cfg: cfg.clone(),
                 stream_idx,
-                next_packet_id: 0,
                 socket: Some(socket),
-                sender: None,
+                ..UdpReceiver::default()
             })
         }
 
@@ -197,9 +196,8 @@ pub mod receiver {
                 active: true,
                 cfg: cfg.clone(),
                 stream_idx,
-                next_packet_id: 0,
                 socket: Some(socket),
-                sender: None,
+                ..UdpReceiver::default()
             }
         }
 
@@ -425,6 +423,7 @@ pub mod receiver {
         fn interval_process_packet_send(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             if self.sender.is_none() {
                 let incoming_addr = self.get_incoming_socket_addr()?;
+                // remove the ownership of the socket from the receiver and give it to the sender
                 let socket = self.socket.take().ok_or(Box::new(error_gen!("unable to get socket")))?;
                 socket.connect(incoming_addr)?;
                 let sender = UdpSender::new_from_udp_socket(&self.cfg, self.stream_idx, socket)?;
@@ -437,12 +436,11 @@ pub mod receiver {
     }
     impl TestRunner for UdpReceiver {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            let res = if self.cfg.reverse_nat.unwrap_or(false) {
-                self.interval_process_packet_send()?
+            if self.cfg.reverse_nat.unwrap_or(false) {
+                self.interval_process_packet_send()
             } else {
-                self.interval_process_packet_receive()?
-            };
-            Ok(res)
+                self.interval_process_packet_receive()
+            }
         }
 
         fn get_port(&self) -> BoxResult<u16> {
@@ -459,6 +457,9 @@ pub mod receiver {
 
         fn stop(&mut self) {
             self.active = false;
+            if let Some(s) = self.sender.as_mut() {
+                s.stop();
+            }
         }
     }
 }
@@ -713,6 +714,7 @@ pub mod sender {
         fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {
             if self.receiver.is_none() {
                 self.send_initial_packet()?;
+                // remove the ownership of the socket from the sender and give it to the receiver
                 let socket = self.socket.take().ok_or(Box::new(error_gen!("unable to get socket")))?;
                 let receiver = UdpReceiver::new_from_udp_socket(&self.cfg, self.stream_idx, socket);
                 self.receiver = Some(Box::new(receiver));
@@ -724,12 +726,11 @@ pub mod sender {
     }
     impl TestRunner for UdpSender {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            let res = if self.cfg.reverse_nat.unwrap_or(false) {
-                self.interval_process_packet_receive()?
+            if self.cfg.reverse_nat.unwrap_or(false) {
+                self.interval_process_packet_receive()
             } else {
-                self.interval_process_packet_send()?
-            };
-            Ok(res)
+                self.interval_process_packet_send()
+            }
         }
 
         fn get_port(&self) -> BoxResult<u16> {
@@ -746,6 +747,9 @@ pub mod sender {
 
         fn stop(&mut self) {
             self.active = false;
+            if let Some(r) = self.receiver.as_mut() {
+                r.stop();
+            }
         }
     }
 }
