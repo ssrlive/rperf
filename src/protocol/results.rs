@@ -144,7 +144,9 @@ impl IntervalResult for ClientFailedResult {
 }
 pub struct ServerFailedResult {
     pub stream_idx: usize,
+    pub error_info: String,
 }
+
 impl IntervalResult for ServerFailedResult {
     fn kind(&self) -> IntervalResultKind {
         IntervalResultKind::ServerFailed
@@ -155,8 +157,9 @@ impl IntervalResult for ServerFailedResult {
     }
 
     fn to_message(&self) -> Message {
+        let info = format!("server: {}", self.error_info);
         Message::Failed(FinalState {
-            origin: Some("server".to_string()),
+            origin: Some(info),
             stream_idx: Some(self.stream_idx),
         })
     }

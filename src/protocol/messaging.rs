@@ -61,6 +61,17 @@ pub struct FinalState {
     pub stream_idx: Option<usize>,
 }
 
+impl std::fmt::Display for FinalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.origin, &self.stream_idx) {
+            (Some(origin), Some(stream_idx)) => write!(f, "stream {}, {}", stream_idx, origin),
+            (Some(origin), None) => write!(f, "{}", origin),
+            (None, Some(stream_idx)) => write!(f, "stream {}", stream_idx),
+            (None, None) => write!(f, ""),
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "kind")]
 pub enum Message {

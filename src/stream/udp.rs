@@ -697,7 +697,7 @@ pub mod sender {
                 let err = Box::new(error_gen!("could not get socket"));
                 let packet_size = match self.socket.as_ref().ok_or(err)?.send(&self.staged_packet[written..]) {
                     Ok(packet_size) => packet_size,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::Interrupted => {
                         sleep(BUFFER_FULL_TIMEOUT);
                         continue;
                     }

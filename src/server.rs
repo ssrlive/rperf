@@ -219,8 +219,9 @@ fn test_run_interval(
         let interval_result = match test.run_interval() {
             Ok(interval_result) => interval_result,
             Err(e) => {
-                log::error!("[{}] unable to process stream {}, error: {}", peer_addr, stream_idx, e);
-                c_results_tx.send(Box::new(ServerFailedResult { stream_idx }))?;
+                let error_info = e.to_string();
+                log::error!("[{}] unable to process stream {}, error: {}", peer_addr, stream_idx, error_info);
+                c_results_tx.send(Box::new(ServerFailedResult { stream_idx, error_info }))?;
                 break;
             }
         };

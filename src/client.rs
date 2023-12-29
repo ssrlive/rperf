@@ -329,8 +329,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                                 Message::Done(_) => {
                                     log::info!("server reported completion of stream {}", idx64);
                                 }
-                                Message::Failed(_) => {
-                                    log::warn!("server reported failure with stream {}", idx64);
+                                Message::Failed(state) => {
+                                    log::warn!("server reported failure with stream {}, error: {}", idx64, state);
                                     tr.mark_stream_done(idx64, false);
                                 }
                                 _ => (), //not possible
