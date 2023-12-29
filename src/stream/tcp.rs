@@ -211,11 +211,7 @@ pub mod receiver {
             })
         }
 
-        pub(crate) fn new_from_std_tcp_stream(
-            cfg: &Configuration,
-            stream_idx: usize,
-            stream: std::net::TcpStream,
-        ) -> BoxResult<TcpReceiver> {
+        pub(crate) fn new_from_std_stream(cfg: &Configuration, stream_idx: usize, stream: std::net::TcpStream) -> BoxResult<TcpReceiver> {
             let mut stream = mio::net::TcpStream::from_std(stream);
             let mio_token = get_global_token();
             let mio_poll = mio::Poll::new()?;
@@ -777,7 +773,7 @@ pub mod sender {
                 if self.receiver.is_none() {
                     // remove the ownership of the stream from the sender and give it to the receiver
                     let stream = self.stream.take().ok_or(Box::new(error_gen!("no stream currently exists")))?;
-                    let stream = TcpReceiver::new_from_std_tcp_stream(&self.cfg, self.stream_idx, stream)?;
+                    let stream = TcpReceiver::new_from_std_stream(&self.cfg, self.stream_idx, stream)?;
                     self.receiver = Some(Box::new(stream));
                 }
                 let receiver = self.receiver.as_mut().ok_or(Box::new(error_gen!("no receiver currently exists")))?;
