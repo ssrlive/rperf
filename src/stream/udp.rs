@@ -526,6 +526,7 @@ pub mod sender {
         }
 
         pub fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> BoxResult<UdpSender> {
+            socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             let mut staged_packet = vec![0_u8; cfg.length as usize];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) {
                 //fill the packet with a fixed sequence
@@ -591,6 +592,7 @@ pub mod sender {
                         continue;
                     }
                     Err(e) => {
+                        log::error!("unable to send UDP packet: {}", e);
                         return Err(Box::new(e));
                     }
                 };
@@ -693,7 +695,8 @@ pub mod sender {
 
         fn send_initial_packet(&mut self) -> BoxResult<()> {
             let mut written = 0;
-            loop {
+            let start = Instant::now();
+            while self.active && start.elapsed() < INTERVAL {
                 let err = Box::new(error_gen!("could not get socket"));
                 let packet_size = match self.socket.as_ref().ok_or(err)?.send(&self.staged_packet[written..]) {
                     Ok(packet_size) => packet_size,
@@ -710,6 +713,7 @@ pub mod sender {
                     return Ok(());
                 }
             }
+            Err(Box::new(error_gen!("unable to send initial packet")))
         }
 
         fn interval_process_packet_receive(&mut self) -> BoxResult<Option<IntervalResultBox>> {

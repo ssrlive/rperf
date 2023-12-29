@@ -212,6 +212,7 @@ pub mod receiver {
         }
 
         pub(crate) fn new_from_std_stream(cfg: &Configuration, stream_idx: usize, stream: std::net::TcpStream) -> BoxResult<TcpReceiver> {
+            stream.set_read_timeout(Some(RECEIVE_TIMEOUT))?;
             let mut stream = mio::net::TcpStream::from_std(stream);
             let mio_token = get_global_token();
             let mio_poll = mio::Poll::new()?;
@@ -533,6 +534,7 @@ pub mod sender {
         }
 
         pub(crate) fn new_from_tcp_stream(cfg: &Configuration, stream_idx: usize, stream: TcpStream) -> BoxResult<TcpSender> {
+            stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
             Ok(TcpSender {
                 active: AtomicBool::new(true),
                 cfg: cfg.clone(),
