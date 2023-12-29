@@ -211,6 +211,29 @@ pub mod receiver {
             })
         }
 
+        pub(crate) fn new_from_std_tcp_stream(
+            cfg: &Configuration,
+            stream_idx: usize,
+            stream: std::net::TcpStream,
+        ) -> BoxResult<TcpReceiver> {
+            let mut stream = mio::net::TcpStream::from_std(stream);
+            let mio_token = get_global_token();
+            let mio_poll = mio::Poll::new()?;
+            mio_poll.registry().register(&mut stream, mio_token, mio::Interest::READABLE)?;
+
+            Ok(TcpReceiver {
+                active: AtomicBool::new(true),
+                cfg: cfg.clone(),
+                stream_idx,
+                listener: None,
+                stream: Some(stream),
+                mio_events: mio::Events::with_capacity(1),
+                mio_token,
+                mio_poll,
+                sender: None,
+            })
+        }
+
         fn process_connection(&mut self) -> BoxResult<(TcpStream, u64, f32)> {
             log::debug!("preparing to receive TCP stream {} connection...", self.stream_idx);
 
@@ -328,10 +351,10 @@ pub mod receiver {
             }
         }
 
-        fn process_stream_receive(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> BoxResult<Option<IntervalResultBox>> {
-            let mut bytes_received: u64 = _bytes_received;
+        pub(crate) fn process_stream_receive(&mut self, received: u64, time_elapsed: f32) -> BoxResult<Option<IntervalResultBox>> {
+            let mut bytes_received: u64 = received;
 
-            let additional_time_elapsed: f32 = _additional_time_elapsed;
+            let additional_time_elapsed: f32 = time_elapsed;
 
             let stream = self.stream.as_mut().ok_or(Box::new(error_gen!("no stream currently exists")))?;
 
@@ -456,7 +479,7 @@ pub mod receiver {
 }
 
 pub mod sender {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::thread::sleep;
@@ -466,7 +489,7 @@ pub mod sender {
         error_gen,
         protocol::{
             messaging::{Configuration, Message, TransmitState},
-            results::{get_unix_timestamp, IntervalResultBox, TcpReceiveResult, TcpSendResult},
+            results::{get_unix_timestamp, IntervalResultBox, TcpSendResult},
         },
         stream::{tcp::receiver::TcpReceiver, TestRunner, INTERVAL},
         BoxResult,
@@ -700,73 +723,6 @@ pub mod sender {
             }
         }
 
-        fn process_stream_receive(&mut self, _bytes_received: u64, _additional_time_elapsed: f32) -> BoxResult<Option<IntervalResultBox>> {
-            let mut bytes_received: u64 = _bytes_received;
-
-            let additional_time_elapsed: f32 = _additional_time_elapsed;
-
-            let stream = self.stream.as_mut().unwrap();
-
-            let mut buf = vec![0_u8; self.cfg.length as usize];
-
-            let peer_addr = stream.peer_addr()?;
-            let start = Instant::now();
-
-            while self.active.load(Relaxed) && start.elapsed() < INTERVAL {
-                let packet_size = match stream.read(&mut buf) {
-                    Ok(packet_size) => packet_size,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                        // receive timeout
-                        sleep(WRITE_TIMEOUT);
-                        continue;
-                    }
-                    Err(e) => {
-                        return Err(Box::new(e));
-                    }
-                };
-
-                log::trace!(
-                    "received {} bytes in TCP stream {} from {}",
-                    packet_size,
-                    self.stream_idx,
-                    peer_addr
-                );
-                if packet_size == 0 {
-                    // test's over
-                    // HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
-                    self.active.store(false, Relaxed);
-                    break;
-                }
-
-                bytes_received += packet_size as u64;
-            }
-            if bytes_received > 0 {
-                log::debug!(
-                    "{} bytes received via TCP stream {} from {} in this interval; reporting...",
-                    bytes_received,
-                    self.stream_idx,
-                    peer_addr
-                );
-                let receive_result = TransmitState {
-                    timestamp: get_unix_timestamp(),
-                    stream_idx: Some(self.stream_idx),
-                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
-                    bytes_received: Some(bytes_received),
-                    family: Some("tcp".to_string()),
-                    ..TransmitState::default()
-                };
-                let receive_result = Message::Receive(receive_result);
-                Ok(Some(Box::new(TcpReceiveResult::try_from(&receive_result).unwrap())))
-            } else {
-                log::debug!(
-                    "no bytes received via TCP stream {} from {} in this interval",
-                    self.stream_idx,
-                    peer_addr
-                );
-                Ok(None)
-            }
-        }
-
         fn send_test_uuid(&mut self) -> BoxResult<()> {
             if !self.test_id_sent {
                 let stream = self.stream.as_mut().ok_or(Box::new(error_gen!("no stream currently exists")))?;
@@ -809,22 +765,33 @@ pub mod sender {
 
     impl TestRunner for TcpSender {
         fn run_interval(&mut self) -> BoxResult<Option<IntervalResultBox>> {
-            if self.stream.is_none() {
+            if self.stream.is_none() && self.receiver.is_none() {
                 // if still in the setup phase, connect to the receiver
                 self.stream = Some(self.process_connection()?);
             }
             if self.cfg.reverse_nat.unwrap_or(false) {
-                self.send_test_uuid()?;
-                self.process_stream_receive(0, 0.0)
+                if self.stream.is_some() && self.receiver.is_none() {
+                    // if still in the setup phase, send the test ID
+                    self.send_test_uuid()?;
+                }
+                if self.receiver.is_none() {
+                    // remove the ownership of the stream from the sender and give it to the receiver
+                    let stream = self.stream.take().ok_or(Box::new(error_gen!("no stream currently exists")))?;
+                    let stream = TcpReceiver::new_from_std_tcp_stream(&self.cfg, self.stream_idx, stream)?;
+                    self.receiver = Some(Box::new(stream));
+                }
+                let receiver = self.receiver.as_mut().ok_or(Box::new(error_gen!("no receiver currently exists")))?;
+                receiver.process_stream_receive(0, 0.0)
             } else {
                 self.process_stream_send()
             }
         }
 
         fn get_port(&self) -> BoxResult<u16> {
-            match &self.stream {
-                Some(stream) => Ok(stream.local_addr()?.port()),
-                None => Err(Box::new(error_gen!("no stream currently exists"))),
+            match (&self.stream, &self.receiver) {
+                (Some(stream), _) => Ok(stream.local_addr()?.port()),
+                (_, Some(receiver)) => receiver.get_port(),
+                _ => Err(Box::new(error_gen!("no port currently bound"))),
             }
         }
 
