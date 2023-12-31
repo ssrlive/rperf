@@ -79,17 +79,17 @@ fn connect_to_server(address: &str, port: u16) -> BoxResult<TcpStream> {
     Ok(stream)
 }
 
-fn prepare_test_results(is_udp: bool, stream_count: usize) -> Mutex<Box<dyn TestResults + Send + Sync + 'static>> {
-    if is_udp {
+fn prepare_test_results(args: &args::Args, stream_count: usize) -> Mutex<Box<dyn TestResults + Send + Sync + 'static>> {
+    if args.udp {
         //UDP
-        let mut udp_test_results = UdpTestResults::new();
+        let mut udp_test_results = UdpTestResults::new(args);
         for i in 0..stream_count {
             udp_test_results.prepare_index(i);
         }
         Mutex::new(Box::new(udp_test_results))
     } else {
         //TCP
-        let mut tcp_test_results = TcpTestResults::new();
+        let mut tcp_test_results = TcpTestResults::new(args);
         for i in 0..stream_count {
             tcp_test_results.prepare_index(i);
         }
@@ -138,7 +138,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx) = channel::<IntervalResultBox>();
 
-    let test_results: Mutex<Box<dyn TestResults + Send + Sync + 'static>> = prepare_test_results(is_udp, stream_count);
+    let test_results: Mutex<Box<dyn TestResults + Send + Sync + 'static>> = prepare_test_results(args, stream_count);
 
     //a closure used to pass results from stream-handlers to the test-result structure
     let mut results_handler = || -> BoxResult<()> {

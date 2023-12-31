@@ -19,7 +19,7 @@
  */
 
 use crate::protocol::messaging::{FinalState, Message};
-use crate::{error_gen, BoxError, BoxResult};
+use crate::{args::Args, error_gen, BoxError, BoxResult};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -831,14 +831,16 @@ pub struct TcpTestResults {
     pending_tests: HashSet<usize>,
     failed_tests: HashSet<usize>,
     server_tests_finished: HashSet<usize>,
+    args: Args,
 }
 impl TcpTestResults {
-    pub fn new() -> TcpTestResults {
+    pub fn new(args: &Args) -> TcpTestResults {
         TcpTestResults {
             stream_results: HashMap::new(),
             pending_tests: HashSet::new(),
             failed_tests: HashSet::new(),
             server_tests_finished: HashSet::new(),
+            args: args.clone(),
         }
     }
     pub fn prepare_index(&mut self, idx: usize) {
@@ -1053,13 +1055,19 @@ impl TestResults for TcpTestResults {
             ),
         };
 
-        let mut output = format!(
-            "==========\n\
-            TCP send result over {:.2}s | streams: {}\n\
-            stream-average bytes per second: {:.3} | {}\n\
-            total bytes: {} | per second: {:.3} | {}\n\
-            ==========\n\
-            TCP receive result over {:.2}s | streams: {}\n\
+        let mode = if self.args.reverse {
+            "reverse"
+        } else if self.args.reverse_nat {
+            "reverse-NAT"
+        } else {
+            "forward"
+        };
+
+        let line = "============================================================";
+        let title = format!("TCP testing {} mode", mode);
+
+        let send = format!(
+            "TCP send result over {:.2}s | streams: {}\n\
             stream-average bytes per second: {:.3} | {}\n\
             total bytes: {} | per second: {:.3} | {}",
             stream_send_durations[stream_send_durations.len() - 1],
@@ -1069,6 +1077,11 @@ impl TestResults for TcpTestResults {
             bytes_sent,
             send_bytes_per_second * stream_count as f64,
             total_send_throughput,
+        );
+        let receive = format!(
+            "TCP receive result over {:.2}s | streams: {}\n\
+            stream-average bytes per second: {:.3} | {}\n\
+            total bytes: {} | per second: {:.3} | {}",
             stream_receive_durations[stream_receive_durations.len() - 1],
             stream_count,
             receive_bytes_per_second,
@@ -1077,13 +1090,15 @@ impl TestResults for TcpTestResults {
             receive_bytes_per_second * stream_count as f64,
             total_receive_throughput,
         );
+
+        let mut output = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}", line, title, line, send, line, receive, line);
+
         if sends_blocked {
             output.push_str("\nthroughput throttled by buffer limitations");
         }
         if !self.is_success() {
             output.push_str("\nTESTING DID NOT COMPLETE SUCCESSFULLY");
         }
-
         output
     }
 }
@@ -1093,14 +1108,16 @@ pub struct UdpTestResults {
     pending_tests: HashSet<usize>,
     failed_tests: HashSet<usize>,
     server_tests_finished: HashSet<usize>,
+    args: Args,
 }
 impl UdpTestResults {
-    pub fn new() -> UdpTestResults {
+    pub fn new(args: &Args) -> UdpTestResults {
         UdpTestResults {
             stream_results: HashMap::new(),
             pending_tests: HashSet::new(),
             failed_tests: HashSet::new(),
             server_tests_finished: HashSet::new(),
+            args: args.clone(),
         }
     }
     pub fn prepare_index(&mut self, idx: usize) {
@@ -1382,17 +1399,23 @@ impl TestResults for UdpTestResults {
         } else {
             packets_sent as f64
         };
-        let mut output = format!(
-            "==========\n\
-            UDP send result over {:.2}s | streams: {}\n\
+
+        let mode = if self.args.reverse {
+            "reverse"
+        } else if self.args.reverse_nat {
+            "reverse-NAT"
+        } else {
+            "forward"
+        };
+
+        let line = "============================================================";
+        let title = format!("UDP testing {} mode", mode);
+
+        let send = format!(
+            "UDP send result over {:.2}s | streams: {}\n\
             stream-average bytes per second: {:.3} | {}\n\
             total bytes: {} | per second: {:.3} | {}\n\
-            packets: {} per second: {:.3}\n\
-            ==========\n\
-            UDP receive result over {:.2}s | streams: {}\n\
-            stream-average bytes per second: {:.3} | {}\n\
-            total bytes: {} | per second: {:.3} | {}\n\
-            packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
+            packets: {} per second: {:.3}",
             stream_send_durations[stream_send_durations.len() - 1],
             stream_count,
             send_bytes_per_second,
@@ -1402,6 +1425,12 @@ impl TestResults for UdpTestResults {
             total_send_throughput,
             packets_sent,
             (packets_sent as f64 / send_duration_divisor) * stream_count as f64,
+        );
+        let receive = format!(
+            "UDP receive result over {:.2}s | streams: {}\n\
+            stream-average bytes per second: {:.3} | {}\n\
+            total bytes: {} | per second: {:.3} | {}\n\
+            packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
             stream_receive_durations[stream_receive_durations.len() - 1],
             stream_count,
             receive_bytes_per_second,
@@ -1416,6 +1445,9 @@ impl TestResults for UdpTestResults {
             packets_duplicated,
             (packets_received as f64 / receive_duration_divisor) * stream_count as f64,
         );
+
+        let mut output = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}", line, title, line, send, line, receive, line);
+
         if jitter_calculated {
             output.push_str(&format!(
                 "\njitter: {:.6}s over {} consecutive packets",
@@ -1426,7 +1458,7 @@ impl TestResults for UdpTestResults {
         if sends_blocked {
             output.push_str("\nthroughput throttled by buffer limitations");
         }
-        if !self.is_success() {
+        if !self.is_success() || bytes_received == 0 {
             output.push_str("\nTESTING DID NOT COMPLETE SUCCESSFULLY");
         }
 
