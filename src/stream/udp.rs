@@ -39,6 +39,7 @@ pub mod receiver {
 
     const READ_TIMEOUT: Duration = Duration::from_millis(50);
 
+    #[derive(Default)]
     pub struct UdpPortPool {
         pub ports_ip4: Vec<u16>,
         pos_ip4: usize,
@@ -66,12 +67,8 @@ pub mod receiver {
 
             UdpPortPool {
                 ports_ip4: ports,
-                pos_ip4: 0,
-                lock_ip4: Mutex::new(0),
-
                 ports_ip6: ports6,
-                pos_ip6: 0,
-                lock_ip6: Mutex::new(0),
+                ..UdpPortPool::default()
             }
         }
 
@@ -169,7 +166,6 @@ pub mod receiver {
         pub fn new(cfg: &Configuration, stream_idx: usize, port_pool: &mut UdpPortPool, peer_ip: IpAddr) -> BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip)?;
-            socket.set_read_timeout(Some(READ_TIMEOUT))?;
 
             let _receive_buffer = cfg.receive_buffer.unwrap_or(0) as usize;
 
@@ -182,13 +178,7 @@ pub mod receiver {
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
-            Ok(UdpReceiver {
-                active: true,
-                cfg: cfg.clone(),
-                stream_idx,
-                socket: Some(socket),
-                ..UdpReceiver::default()
-            })
+            Self::new_from_udp_socket(cfg, stream_idx, socket)
         }
 
         pub(crate) fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> BoxResult<UdpReceiver> {
@@ -545,9 +535,8 @@ pub mod sender {
                 send_interval: cfg.send_interval.unwrap_or(0.0),
 
                 remaining_duration: cfg.duration.unwrap_or(0.0),
-                next_packet_id: 0,
                 staged_packet,
-                receiver: None,
+                ..UdpSender::default()
             })
         }
 
