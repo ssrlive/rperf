@@ -22,7 +22,7 @@ use crate::{
     args, error_gen,
     protocol::{
         communication::{receive_message, send_message},
-        messaging::{prepare_configuration, Message},
+        messaging::{prepare_configuration, Configuration, Message},
         results::{interval_result_from_message, ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
@@ -79,17 +79,17 @@ fn connect_to_server(address: &str, port: u16) -> BoxResult<TcpStream> {
     Ok(stream)
 }
 
-fn prepare_test_results(args: &args::Args, stream_count: usize) -> Mutex<Box<dyn TestResults + Send + Sync + 'static>> {
-    if args.udp {
+fn prepare_test_results(config: &Configuration, stream_count: usize) -> Mutex<Box<dyn TestResults + Send + Sync + 'static>> {
+    if config.is_udp() {
         //UDP
-        let mut udp_test_results = UdpTestResults::new(args);
+        let mut udp_test_results = UdpTestResults::new(config);
         for i in 0..stream_count {
             udp_test_results.prepare_index(i);
         }
         Mutex::new(Box::new(udp_test_results))
     } else {
         //TCP
-        let mut tcp_test_results = TcpTestResults::new(args);
+        let mut tcp_test_results = TcpTestResults::new(config);
         for i in 0..stream_count {
             tcp_test_results.prepare_index(i);
         }
@@ -123,8 +123,6 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         }
     }
 
-    let is_udp = args.udp;
-
     let test_id = uuid::Uuid::new_v4();
     let mut config = prepare_configuration(args, test_id);
 
@@ -138,7 +136,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx) = channel::<IntervalResultBox>();
 
-    let test_results: Mutex<Box<dyn TestResults + Send + Sync + 'static>> = prepare_test_results(args, stream_count);
+    let test_results: Mutex<Box<dyn TestResults + Send + Sync + 'static>> = prepare_test_results(&config, stream_count);
 
     //a closure used to pass results from stream-handlers to the test-result structure
     let mut results_handler = || -> BoxResult<()> {
@@ -182,29 +180,30 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         Ok(())
     };
 
+    let mode = config.traffic_mode();
+    let family = config.family.as_deref().unwrap();
+
     //depending on whether this is a forward- or reverse-test, the order of configuring test-streams will differ
     if args.reverse {
-        log::debug!("running in reverse-mode: server will be uploading data");
+        log::debug!("running in {} mode: server will be sending data", mode);
 
         //when we're receiving data, we're also responsible for letting the server know where to send it
         let mut stream_ports = Vec::with_capacity(stream_count);
 
-        if is_udp {
-            //UDP
-            log::info!("preparing for reverse-UDP test with {} streams...", stream_count);
+        log::info!("preparing for {} {} test with {} streams...", mode, family, stream_count);
 
+        if config.is_udp() {
+            //UDP
             for stream_idx in 0..stream_count {
-                log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
+                log::debug!("preparing {} receiver for stream {}...", family, stream_idx);
                 let test = udp::receiver::UdpReceiver::new(&config, stream_idx, &mut udp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
         } else {
             //TCP
-            log::info!("preparing for reverse-TCP test with {} streams...", stream_count);
-
             for stream_idx in 0..stream_count {
-                log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
+                log::debug!("preparing {} receiver for stream {}...", family, stream_idx);
                 let test = tcp::receiver::TcpReceiver::new(&config, stream_idx, &mut tcp_port_pool, server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -220,9 +219,9 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         send_message(&mut stream, &config)?;
     } else {
         if args.reverse_nat {
-            log::debug!("running in reverse-NAT-mode: server will be senting data");
+            log::debug!("running in {} mode: server will be senting data", mode);
         } else {
-            log::debug!("running in forward-mode: server will be receiving data");
+            log::debug!("running in {} mode: server will be receiving data", mode);
         }
 
         let config = Message::Configuration(config.clone());
@@ -236,29 +235,19 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let connection_payload = receive_message(&mut stream, is_alive, &mut results_handler)?;
     match connection_payload {
         Message::Connect { stream_ports } => {
+            log::info!("preparing for {} {} test with {} streams...", family, mode, stream_count);
             // we need to connect to the server
-            if is_udp {
+            if config.is_udp() {
                 // UDP
-                if args.reverse_nat {
-                    log::info!("preparing for UDP reverse-NAT test with {} streams...", stream_count);
-                } else {
-                    log::info!("preparing for UDP test with {} streams...", stream_count);
-                }
-
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
-                    log::debug!("preparing UDP-sender for stream {}...", stream_idx);
+                    log::debug!("preparing {} sender for stream {}...", family, stream_idx);
                     let test = udp::sender::UdpSender::new(&config, stream_idx, 0, server_addr.ip(), port)?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }
             } else {
                 // TCP
-                if args.reverse_nat {
-                    log::info!("preparing for TCP reverse-NAT test with {} streams...", stream_count);
-                } else {
-                    log::info!("preparing for TCP test with {} streams...", stream_count);
-                }
                 for (stream_idx, &port) in stream_ports.iter().enumerate() {
-                    log::debug!("preparing TCP-sender for stream {}...", stream_idx);
+                    log::debug!("preparing {} sender for stream {}...", family, stream_idx);
                     let test = tcp::sender::TcpSender::new(&config, stream_idx, server_addr.ip(), port)?;
                     parallel_streams.push(Arc::new(Mutex::new(test)));
                 }

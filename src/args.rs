@@ -145,6 +145,13 @@ pub struct Args {
     pub verbosity: ArgVerbosity,
 }
 
+impl Default for Args {
+    fn default() -> Self {
+        use clap::Parser;
+        Self::parse()
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum, Default)]
 pub enum Format {
     #[default]

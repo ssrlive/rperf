@@ -18,8 +18,8 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::messaging::{FinalState, Message};
-use crate::{args::Args, error_gen, BoxError, BoxResult};
+use crate::protocol::messaging::{Configuration, FinalState, Message};
+use crate::{error_gen, BoxError, BoxResult};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -831,16 +831,16 @@ pub struct TcpTestResults {
     pending_tests: HashSet<usize>,
     failed_tests: HashSet<usize>,
     server_tests_finished: HashSet<usize>,
-    args: Args,
+    config: Configuration,
 }
 impl TcpTestResults {
-    pub fn new(args: &Args) -> TcpTestResults {
+    pub fn new(config: &Configuration) -> TcpTestResults {
         TcpTestResults {
             stream_results: HashMap::new(),
             pending_tests: HashSet::new(),
             failed_tests: HashSet::new(),
             server_tests_finished: HashSet::new(),
-            args: args.clone(),
+            config: config.clone(),
         }
     }
     pub fn prepare_index(&mut self, idx: usize) {
@@ -1055,13 +1055,7 @@ impl TestResults for TcpTestResults {
             ),
         };
 
-        let mode = if self.args.reverse {
-            "reverse"
-        } else if self.args.reverse_nat {
-            "reverse-NAT"
-        } else {
-            "forward"
-        };
+        let mode = self.config.traffic_mode();
 
         let line = "============================================================";
         let title = format!("TCP testing {} mode", mode);
@@ -1108,16 +1102,16 @@ pub struct UdpTestResults {
     pending_tests: HashSet<usize>,
     failed_tests: HashSet<usize>,
     server_tests_finished: HashSet<usize>,
-    args: Args,
+    config: Configuration,
 }
 impl UdpTestResults {
-    pub fn new(args: &Args) -> UdpTestResults {
+    pub fn new(config: &Configuration) -> UdpTestResults {
         UdpTestResults {
             stream_results: HashMap::new(),
             pending_tests: HashSet::new(),
             failed_tests: HashSet::new(),
             server_tests_finished: HashSet::new(),
-            args: args.clone(),
+            config: config.clone(),
         }
     }
     pub fn prepare_index(&mut self, idx: usize) {
@@ -1400,13 +1394,7 @@ impl TestResults for UdpTestResults {
             packets_sent as f64
         };
 
-        let mode = if self.args.reverse {
-            "reverse"
-        } else if self.args.reverse_nat {
-            "reverse-NAT"
-        } else {
-            "forward"
-        };
+        let mode = self.config.traffic_mode();
 
         let line = "============================================================";
         let title = format!("UDP testing {} mode", mode);

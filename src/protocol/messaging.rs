@@ -37,6 +37,22 @@ pub struct Configuration {
     pub stream_ports: Option<Vec<u16>>,
 }
 
+impl Configuration {
+    pub fn traffic_mode(&self) -> &'static str {
+        if self.role == "upload" {
+            "reverse"
+        } else if self.reverse_nat == Some(true) {
+            "reverse-NAT"
+        } else {
+            "forward"
+        }
+    }
+
+    pub fn is_udp(&self) -> bool {
+        self.family.as_deref() == Some("udp")
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct TransmitState {
     pub family: Option<String>,

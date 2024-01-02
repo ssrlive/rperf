@@ -21,8 +21,7 @@
 use rperf::{args, client, server, BoxResult};
 
 fn main() -> BoxResult<()> {
-    use clap::Parser;
-    let args = args::Args::parse();
+    let args = args::Args::default();
 
     let default = args.verbosity.to_string();
     let mut env = env_logger::Env::default().filter_or("RUST_LOG", &default);
