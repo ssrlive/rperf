@@ -416,8 +416,7 @@ pub mod receiver {
                 let incoming_addr = self.get_incoming_socket_addr()?;
                 // remove the ownership of the socket from the receiver and give it to the sender
                 let socket = self.socket.take().ok_or(Box::new(error_gen!("unable to get socket")))?;
-                socket.connect(incoming_addr)?;
-                let sender = UdpSender::new_from_udp_socket(&self.cfg, self.stream_idx, socket)?;
+                let sender = UdpSender::new_from_udp_socket(&self.cfg, self.stream_idx, socket, Some(incoming_addr))?;
                 self.sender = Some(Box::new(sender));
             }
             let sender = self.sender.as_mut().unwrap();
@@ -480,6 +479,7 @@ pub mod sender {
         stream_idx: usize,
 
         socket: Option<UdpSocket>,
+        target: Option<SocketAddr>,
 
         //the interval, in seconds, at which to send data
         send_interval: f32,
@@ -498,7 +498,6 @@ pub mod sender {
                 IpAddr::V6(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?,
                 IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))?,
             };
-            socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
 
             let _send_buffer: usize = cfg.send_buffer.unwrap_or(0) as usize;
 
@@ -509,13 +508,12 @@ pub mod sender {
                 let raw_socket = socket2::SockRef::from(&socket);
                 raw_socket.set_send_buffer_size(_send_buffer)?;
             }
-            socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
 
-            Self::new_from_udp_socket(cfg, stream_idx, socket)
+            Self::new_from_udp_socket(cfg, stream_idx, socket, Some(socket_addr_receiver))
         }
 
-        pub fn new_from_udp_socket(cfg: &Configuration, stream_idx: usize, socket: UdpSocket) -> BoxResult<UdpSender> {
+        pub fn new_from_udp_socket(cfg: &Configuration, idx: usize, socket: UdpSocket, target: Option<SocketAddr>) -> BoxResult<UdpSender> {
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             let mut staged_packet = vec![0_u8; cfg.length as usize];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) {
@@ -528,9 +526,10 @@ pub mod sender {
             Ok(UdpSender {
                 active: true,
                 cfg: cfg.clone(),
-                stream_idx,
+                stream_idx: idx,
 
                 socket: Some(socket),
+                target,
 
                 send_interval: cfg.send_interval.unwrap_or(0.0),
 
@@ -570,8 +569,9 @@ pub mod sender {
                 log::trace!("writing {} bytes in UDP stream {}...", self.staged_packet.len(), self.stream_idx);
                 let packet_start = Instant::now();
 
+                let addr = self.target.ok_or(Box::new(error_gen!("unable to get target")))?;
                 self.prepare_packet()?;
-                let packet_size = match self.socket.as_mut().unwrap().send(&self.staged_packet) {
+                let packet_size = match self.socket.as_mut().unwrap().send_to(&self.staged_packet, addr) {
                     Ok(packet_size) => packet_size,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         //send-buffer is full
@@ -659,11 +659,12 @@ pub mod sender {
                     "no bytes sent via UDP stream {} in this interval; shutting down...",
                     self.stream_idx
                 );
+                let addr = self.target.ok_or(Box::new(error_gen!("unable to get target")))?;
                 //indicate that the test is over by sending the test ID by itself
                 let mut remaining_announcements = 5;
                 while remaining_announcements > 0 {
                     //do it a few times in case of loss
-                    match self.socket.as_mut().unwrap().send(&self.staged_packet[0..16]) {
+                    match self.socket.as_mut().unwrap().send_to(&self.staged_packet[0..16], addr) {
                         Ok(packet_size) => {
                             log::trace!("wrote {} bytes of test-end signal in UDP stream {}", packet_size, self.stream_idx);
                             remaining_announcements -= 1;
@@ -685,9 +686,10 @@ pub mod sender {
         fn send_initial_packet(&mut self) -> BoxResult<()> {
             let mut written = 0;
             let start = Instant::now();
+            let addr = self.target.ok_or(Box::new(error_gen!("unable to get target")))?;
             while self.active && start.elapsed() < INTERVAL {
                 let err = Box::new(error_gen!("could not get socket"));
-                let packet_size = match self.socket.as_ref().ok_or(err)?.send(&self.staged_packet[written..]) {
+                let packet_size = match self.socket.as_ref().ok_or(err)?.send_to(&self.staged_packet[written..], addr) {
                     Ok(packet_size) => packet_size,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::Interrupted => {
                         sleep(BUFFER_FULL_TIMEOUT);
